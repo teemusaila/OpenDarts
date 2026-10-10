@@ -1,0 +1,237 @@
+# Darts Scoreboard for AutoDarts
+
+> **This code was generated with AI** (Claude by Anthropic), directed and tested by the author.
+> See [About this code](#about-this-code).
+
+A darts scoreboard and game manager that runs on the Raspberry Pi of an
+[Autodarts](https://autodarts.io) board. The Pi serves one web page, so any tablet, phone,
+laptop or TV browser on your network can be the scoreboard. Detected darts come in automatically
+from the board service; the page runs the games itself.
+
+- **Games:** X01 (301/501/701, double in/out), Cricket (standard, cut-throat, no points),
+  Around the Clock, Shanghai, Count-Up, Halve-It, Bob's 27 and Killer, with legs and short
+  rules for each game in the menu.
+- **Scoring:** checkout routes, a live dartboard of the round's hits, the last scores of each
+  player, a spoken score caller, tap-to-correct, *Fix scores* for earlier visits, undo.
+- **Displays:** a passive view for a TV (board, hits and the last 10 scores), scaled to any
+  screen size, and a compact phone layout.
+- **Sign-in and game lock:** users with passwords; starting a game locks the board to that
+  user until the match ends, others watch read-only.
+- **Settings page:** users, lights and the game lock are changed from the scoreboard itself.
+- **Optional:** dartboard lights on a Wi-Fi plug, automatic backups and a watchdog, and access
+  from the internet through Tailscale Funnel.
+
+## Requirements
+
+- An **Autodarts board computer** (tested on a Raspberry Pi 5, 8 GB) running **Alpine Linux** in
+  diskless mode, with configuration saved by `lbu` and a persistent partition mounted at
+  **`/data`**.
+- The **Autodarts board service** running on the Pi and answering on
+  `http://127.0.0.1:3180/api/state`.
+- **Root SSH access** to the Pi, and internet access on the Pi for installing packages (`apk`).
+- On your computer: `ssh` and `scp` (macOS and Linux have them; on Windows use WSL or Git Bash).
+
+For the optional parts:
+
+- **Lights:** a Tuya-based Wi-Fi plug (sold under many brands, e.g. Nedis SmartLife) on the same
+  network as the Pi, and its **device ID** and **local key** (see [Lights](#lights)).
+- **Internet access:** a free [Tailscale](https://tailscale.com) account (see
+  [Tailscale](#optional-internet-access-with-tailscale)).
+
+## Installation
+
+1. Download this repository to your computer.
+
+2. Create your settings file from the example and fill it in:
+
+   ```sh
+   cp config.env.example config.env
+   ```
+
+   At minimum set `PI_HOST` (the Pi's address). `config.env` holds your secrets, such as
+   passwords and keys. It is listed in `.gitignore`, so never commit it or share it.
+
+3. Install from your computer:
+
+   ```sh
+   ./deploy.sh
+   ```
+
+   This copies the files to the Pi, runs `install.sh` there as root, and deletes `config.env`
+   from the Pi afterwards. If you left `SCOREBOARD_ADMIN_PASSWORD` empty, it asks for the first
+   user's password.
+
+   Alternatively, copy the folder to the Pi yourself and run `sh install.sh` there as root.
+
+4. Open `http://<pi-address>:8080` in a browser.
+
+Everything starts at boot and is saved with `lbu`. To update, download the new version and run
+`./deploy.sh` again: players, users and settings are kept.
+
+## Configuration
+
+### `config.env` (install time)
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `PI_HOST` | | Address of the Pi, used by `deploy.sh`. |
+| `SCOREBOARD_PORT` | `8080` | Web port of the scoreboard. |
+| `SCOREBOARD_ADMIN_USER` | empty | First user, created as admin. Empty: no sign-in until you add a user. |
+| `SCOREBOARD_ADMIN_PASSWORD` | empty | **Secret.** Password for that user. Empty: asked during the install. |
+| `INSTALL_PUBLIC_VIEW` | `yes` | Read-only copy for sharing (see below). |
+| `INSTALL_MAINTENANCE` | `yes` | Weekly backup, daily log trim and a hardware watchdog. |
+| `INSTALL_LIGHTS` | `no` | Lights on a Wi-Fi plug. |
+| `INSTALL_TAILSCALE` | `no` | Internet access through Tailscale Funnel. |
+| `LIGHTS_*` | | Plug settings, see [Lights](#lights). |
+| `TS_*` | | Tailscale settings, see [Tailscale](#optional-internet-access-with-tailscale). |
+
+### Settings page (any time)
+
+Admins find **Settings** at the bottom of the scoreboard menu. While nobody has signed up yet,
+anyone on the home network can open it to create the first user.
+
+- **Users:** add users, change passwords, make or remove admins, remove users. The first user is
+  always an admin, and the last admin can't be removed.
+- **Lights:** plug device ID, IP address, local key, protocol version, both switch-off times, and
+  automatic / always on / always off. Changes apply within a few seconds.
+- **Game lock:** how long an unused lock lasts before it is released (default 3 hours).
+
+Per-device options (score caller, board address) are in the menu itself.
+
+Users can also be managed on the Pi with `scoreboard-user` (`add`, `passwd`, `del`, `admin`,
+`list`, `unlock`).
+
+## Using it
+
+- **Sign-in:** once a user exists, the browser asks for a name and password.
+- **Game lock:** starting a game locks the board to you. Others see your game read-only until the
+  match ends or you press *End game*. An admin can force-unlock it.
+- **TV:** open the menu's *Open passive display*, or `http://<pi-address>:8080/#passive`.
+- **Corrections:** tap a dart to fix it, or use *Fix scores* for earlier visits.
+
+## Optional parts
+
+### Public read-only view
+
+A copy of the passive display that shows the running game but has no controls, no sign-in and
+nothing that can change data. It listens only inside the Pi (`127.0.0.1:8081`); share it with
+Tailscale Funnel (below) or another tunnel.
+
+### Maintenance
+
+- **Backup:** `pi-backup` runs weekly and keeps five archives in `/data/backups`. They contain
+  passwords and keys, so copy them somewhere safe and private:
+  `scp "root@<pi-address>:/data/backups/pi-backup-*.tar.gz" .`
+- **Log trim:** `/var/log/autodarts.log` is cut back daily once it passes 5 MB.
+- **Watchdog:** the Pi restarts itself if it hangs for 30 seconds.
+
+### Lights
+
+The lights service switches a Tuya Wi-Fi plug on when the board starts, a dart is detected or a
+game is started in the scoreboard. It switches it off after `LIGHTS_IDLE_MINUTES` without
+board activity or `LIGHTS_NO_SCORE_MINUTES` without a new dart. It talks to the plug on your
+own network; no cloud is needed after setup.
+
+To get the plug's **device ID** and **local key** (once):
+
+1. Pair the plug with the **Smart Life** or **Tuya Smart** app. White-label apps often can't be
+   linked to a developer account.
+2. Create a free account at [iot.tuya.com](https://iot.tuya.com) and a *Cloud* project
+   (*Smart Home*). Select the data center that matches your app account in the upper right
+   corner of the page.
+3. In the project, open *Devices* → *Link App Account* and scan the QR code with the app.
+4. On any computer with Python, run `pip install tinytuya` and then `python -m tinytuya wizard`.
+   Enter the project's Access ID and Access Secret. It lists every plug with its `id`, `key` and
+   IP address.
+
+Put the values in `config.env` (`LIGHTS_DEVICE_ID`, `LIGHTS_LOCAL_KEY`, `LIGHTS_IP`) or on the
+Settings page. Reserve the plug's IP address in your router. Re-pairing the plug creates a new
+key.
+
+The Tuya Access Secret is only needed for the wizard. Don't store it on the Pi, and reset it if
+it has been shared.
+
+### Optional: internet access with Tailscale
+
+[Tailscale Funnel](https://tailscale.com/kb/1223/funnel) gives the Pi a public HTTPS address,
+`https://<name>.<tailnet>.ts.net`, without opening ports on your router. Visitors need only a
+browser. Only the Pi runs Tailscale.
+
+Settings in `config.env`:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `INSTALL_TAILSCALE` | `no` | Set to `yes` to install. |
+| `TS_HOSTNAME` | `autodarts-pi` | Machine name; becomes the first part of the address. |
+| `TS_AUTHKEY` | empty | **Secret, optional.** A Tailscale auth key (`tskey-auth-…`) to log in without a browser. Empty: the install prints a login link and waits. |
+| `TS_FUNNEL_PUBLIC` | `yes` | Public read-only view at `https://<name>.<tailnet>.ts.net/`. Needs `INSTALL_PUBLIC_VIEW=yes`. |
+| `TS_FUNNEL_PLAY` | `no` | Full scoreboard with sign-in at `/play/`. Only enabled if at least one scoreboard user exists. |
+
+Then:
+
+1. Run `./deploy.sh`. Without an auth key, open the printed link and log in to Tailscale.
+2. If Tailscale says Funnel isn't enabled for your account, open the link it prints, allow Funnel
+   (and HTTPS certificates), and run `./deploy.sh` again.
+3. A new address can take a few minutes to appear in DNS.
+
+The login is kept in `/data/tailscale`, so it survives reboots. Turn sharing off on the Pi with
+`tailscale funnel --https=443 off`.
+
+On the internet, `/` shows the read-only view to anyone who has the link. `/play/` always asks
+for a scoreboard sign-in, so create users with strong passwords before enabling it.
+
+## Security notes
+
+- The scoreboard uses HTTP Basic sign-in. On the home network this is plain HTTP; through
+  Tailscale it is HTTPS.
+- The Autodarts board service (port 3180) has no sign-in of its own. Don't expose it to the
+  internet; the scoreboard reaches it through the Pi on HTTPS pages.
+- Passwords are stored hashed in `/data/scoreboard-auth/`. The plug key is stored in
+  `/data/lights/config.json`. Both are readable only by root and the web server.
+
+## Files and ports
+
+| Path / port | What |
+|---|---|
+| `:8080` | Scoreboard (all interfaces). |
+| `127.0.0.1:8081` | Public read-only view (local only). |
+| `/data/scoreboard` | Web page, CGI scripts, player list, game lock. |
+| `/data/scoreboard-auth` | Users, admins. |
+| `/data/scoreboard-public` | Read-only copy. |
+| `/data/lights` | Lights service and its settings. |
+| `/data/backups` | Backups. |
+| `/data/tailscale` | Tailscale login state. |
+
+## About this code
+
+All code, scripts and documentation in this repository were generated with AI (Claude by
+Anthropic) in a conversation with the author, written specifically for this project and tested
+on the author's own Autodarts board. No code was copied from other projects:
+
+- The repository contains no third-party code. Programs it relies on are installed from their
+  own sources at install time (see below).
+- The files were checked for licence headers, attribution notes and links to outside code;
+  there are none.
+- Darts rules are common knowledge. The board drawing uses the standard published dartboard
+  measurements, and checkout routes are calculated, not taken from a table.
+
+Like any AI output, it may resemble existing code by coincidence; that can't be ruled out
+completely. Review it before relying on it, and report anything you recognise as copied.
+
+## Third-party software
+
+Installed on the Pi by the scripts, not included in this repository:
+
+| Software | Licence | Used for |
+|---|---|---|
+| [BusyBox](https://busybox.net) (httpd and tools) | GPL-2.0 | Web server, scripts |
+| [Python](https://www.python.org) | PSF License | Lights service |
+| [tinytuya](https://github.com/jasonacox/tinytuya) | MIT | Talking to the Wi-Fi plug |
+| [Tailscale](https://tailscale.com) | BSD-3-Clause | Optional internet access |
+
+Autodarts is a separate product and is not part of this project. This project is not affiliated
+with Autodarts, Tuya, Nedis or Tailscale.
+
+## License
+
+[MIT](LICENSE) © 2026 teemusaila

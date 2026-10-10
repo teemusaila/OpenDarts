@@ -1,0 +1,5 @@
+config.env
+backups/
+*.tar.gz
+*.sha256
+.DS_Store
