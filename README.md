@@ -3,10 +3,13 @@
 > **This code was generated with AI** (Claude by Anthropic), directed and tested by the author.
 > See [About this code](#about-this-code).
 
-A darts scoreboard and game manager that runs on the Raspberry Pi of an
-[Autodarts](https://autodarts.io) board. The Pi serves one web page, so any tablet, phone,
-laptop or TV browser on your network can be the scoreboard. Detected darts come in automatically
-from the board service; the page runs the games itself.
+Set up an [Autodarts](https://autodarts.io) board on a Raspberry Pi 4 or 5 running Alpine Linux,
+and add a darts scoreboard and game manager to it. The Pi serves one web page, so any tablet,
+phone, laptop or TV browser on your network can be the scoreboard. Detected darts come in
+automatically from the board service; the page runs the games itself.
+
+- **Autodarts on Alpine:** installs the official Autodarts board service on Alpine Linux, with
+  optional optimizations (clock sync, CPU and Wi-Fi tuning, camera exposure, overclock).
 
 - **Games:** X01 (301/501/701, double in/out), Cricket (standard, cut-throat, no points),
   Around the Clock, Shanghai, Count-Up, Halve-It, Bob's 27 and Killer, with legs and short
@@ -23,12 +26,15 @@ from the board service; the page runs the games itself.
 
 ## Requirements
 
-- An **Autodarts board computer** (tested on a Raspberry Pi 5, 8 GB) running **Alpine Linux** in
-  diskless mode, with configuration saved by `lbu` and a persistent partition mounted at
-  **`/data`**.
-- The **Autodarts board service** running on the Pi and answering on
-  `http://127.0.0.1:3180/api/state`.
+- A **Raspberry Pi 5 or 4** (tested on a Pi 5 with 8 GB) with the Autodarts cameras, running
+  64-bit **Alpine Linux** in diskless mode. Configuration is saved by `lbu`, and a persistent
+  partition is mounted at **`/data`** (see [Preparing the Pi](#preparing-the-pi)).
+- An **Autodarts account** to pair the board with (at [autodarts.io](https://autodarts.io)).
 - **Root SSH access** to the Pi, and internet access on the Pi for installing packages (`apk`).
+
+If Autodarts already runs on the Pi as a service answering on
+`http://127.0.0.1:3180/api/state`, set `INSTALL_AUTODARTS=no` and only the scoreboard is
+installed.
 - On your computer: `ssh` and `scp` (macOS and Linux have them; on Windows use WSL or Git Bash).
 
 For the optional parts:
@@ -37,6 +43,36 @@ For the optional parts:
   network as the Pi, and its **device ID** and **local key** (see [Lights](#lights)).
 - **Internet access:** a free [Tailscale](https://tailscale.com) account (see
   [Tailscale](#optional-internet-access-with-tailscale)).
+
+## Preparing the Pi
+
+General steps for a fresh SD card (32 GB or more). See the
+[Alpine wiki on the Raspberry Pi](https://wiki.alpinelinux.org/wiki/Raspberry_Pi) for details.
+
+1. Download **Alpine Linux for Raspberry Pi, aarch64** from
+   [alpinelinux.org/downloads](https://alpinelinux.org/downloads/).
+2. Make a small FAT32 boot partition (about 2 GB) on the SD card, unpack the Alpine archive onto
+   it, and leave the rest of the card unpartitioned.
+3. Boot the Pi with a keyboard and screen and run `setup-alpine`:
+   - Network: Wi-Fi or Ethernet, ideally with a fixed address.
+   - SSH: OpenSSH. Add your public key for root (`/root/.ssh/authorized_keys`).
+   - Disk: **none** (diskless). Store configs on the boot partition (`mmcblk0p1`), and keep the
+     apk cache there too.
+4. Create the data partition on the free space and mount it at `/data`:
+
+   ```sh
+   apk add e2fsprogs sfdisk util-linux
+   echo ',,L' | sfdisk --append /dev/mmcblk0
+   partx -a /dev/mmcblk0 2>/dev/null   # or reboot if /dev/mmcblk0p2 doesn't appear
+   mkfs.ext4 -L autodarts /dev/mmcblk0p2
+   mkdir -p /data
+   echo 'LABEL=autodarts /data ext4 noatime,errors=remount-ro 0 2' >> /etc/fstab
+   mount /data
+   rc-update add localmount boot
+   lbu commit -d
+   ```
+
+5. Plug in the cameras and reboot once to check that `/data` is mounted after boot.
 
 ## Installation
 
@@ -78,6 +114,8 @@ Everything starts at boot and is saved with `lbu`. To update, download the new v
 | `SCOREBOARD_PORT` | `8080` | Web port of the scoreboard. |
 | `SCOREBOARD_ADMIN_USER` | empty | First user, created as admin. Empty: no sign-in until you add a user. |
 | `SCOREBOARD_ADMIN_PASSWORD` | empty | **Secret.** Password for that user. Empty: asked during the install. |
+| `INSTALL_AUTODARTS` | `yes` | Install the Autodarts board service. See [Autodarts board](#autodarts-board). |
+| `AD_*`, `OPT_*` | | Autodarts version and optimizations, see the same section. |
 | `INSTALL_PUBLIC_VIEW` | `yes` | Read-only copy for sharing (see below). |
 | `INSTALL_MAINTENANCE` | `yes` | Weekly backup, daily log trim and a hardware watchdog. |
 | `INSTALL_LIGHTS` | `no` | Lights on a Wi-Fi plug. |
@@ -108,6 +146,37 @@ Users can also be managed on the Pi with `scoreboard-user` (`add`, `passwd`, `de
   match ends or you press *End game*. An admin can force-unlock it.
 - **TV:** open the menu's *Open passive display*, or `http://<pi-address>:8080/#passive`.
 - **Corrections:** tap a dart to fix it, or use *Fix scores* for earlier visits.
+
+## Autodarts board
+
+`scripts/autodarts-install.sh` installs the board service:
+
+- Downloads Autodarts with its **official installer** (`autodarts.sh`, headless) as the user
+  `autodarts`, home `/data/autodarts`. No Autodarts files are included in this repository.
+- Runs the official glibc build on Alpine through `gcompat`, plus a tiny shim
+  (`scripts/adshim.c`, compiled during the install) that adds the two glibc functions gcompat
+  lacks.
+- Adds an OpenRC service `autodarts`, started at boot and restarted if it stops. Its log is
+  `/var/log/autodarts.log`.
+- Already installed? It's left alone unless `AD_REINSTALL=yes`. `AD_VERSION` pins a version.
+
+After the install, log in to the Pi and run **`ad`** to pair the board with your Autodarts
+account and set up the cameras. No account details are stored by these scripts.
+
+Optimizations, each set in `config.env`:
+
+| Setting | Default | Effect |
+|---|---|---|
+| `OPT_CLOCK_SYNC` | `yes` | Sets the clock from the network before Autodarts starts. A Pi has no battery clock, and a wrong time breaks secure connections. |
+| `OPT_CPU_PERFORMANCE` | `yes` | CPU governor *performance*: full speed all the time for a steadier detection rate. |
+| `OPT_WIFI_POWERSAVE_OFF` | `yes` | No Wi-Fi power saving, for lower and steadier latency. |
+| `OPT_CAMERA_EXPOSURE` | empty | A number (e.g. `100`) fixes a short exposure on all cameras, which helps with motion blur under bright light. Empty keeps auto exposure. |
+| `OPT_DISABLE_BLUETOOTH` | `yes` | Turns Bluetooth off in `config.txt`. |
+| `OPT_FAST_BOOT` | `yes` | Starts services in parallel. |
+| `OPT_OVERCLOCK` | empty | Pi 4: `2000`; Pi 5: `2600`, `2800` or `3000` MHz, in `config.txt`. Needs good cooling and the official power supply. Applies after a reboot. |
+| `OPT_STATUS_LOGIN` | `yes` | Shows board, address, CPU and Autodarts status at login, and adds the `ad` command. |
+
+The original `config.txt` is kept as `config.txt.bak-autodarts` on the boot partition.
 
 ## Optional parts
 
@@ -195,6 +264,8 @@ for a scoreboard sign-in, so create users with strong passwords before enabling 
 |---|---|
 | `:8080` | Scoreboard (all interfaces). |
 | `127.0.0.1:8081` | Public read-only view (local only). |
+| `:3180` | Autodarts board service (no sign-in; keep it off the internet). |
+| `/data/autodarts` | Autodarts and the glibc shim. |
 | `/data/scoreboard` | Web page, CGI scripts, player list, game lock. |
 | `/data/scoreboard-auth` | Users, admins. |
 | `/data/scoreboard-public` | Read-only copy. |
@@ -224,12 +295,15 @@ Installed on the Pi by the scripts, not included in this repository:
 
 | Software | Licence | Used for |
 |---|---|---|
+| [Autodarts](https://autodarts.io) | Proprietary, by Autodarts | The board service, downloaded from its official installer |
+| [gcompat](https://git.adelielinux.org/adelie/gcompat) | NCSA | Running the glibc build of Autodarts on Alpine |
 | [BusyBox](https://busybox.net) (httpd and tools) | GPL-2.0 | Web server, scripts |
 | [Python](https://www.python.org) | PSF License | Lights service |
 | [tinytuya](https://github.com/jasonacox/tinytuya) | MIT | Talking to the Wi-Fi plug |
 | [Tailscale](https://tailscale.com) | BSD-3-Clause | Optional internet access |
 
-Autodarts is a separate product and is not part of this project. This project is not affiliated
+Autodarts is a separate product and is not part of this project: the scripts download it from
+its official source, and its own licence terms apply. This project is not affiliated
 with Autodarts, Tuya, Nedis or Tailscale.
 
 ## License

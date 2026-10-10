@@ -1,6 +1,6 @@
 #!/bin/sh
 # This code was generated with AI (Claude by Anthropic). MIT License, see LICENSE and README.
-# install.sh: install Darts Scoreboard on an Autodarts Pi running Alpine Linux.
+# install.sh: install Autodarts and Darts Scoreboard on a Raspberry Pi running Alpine Linux.
 #
 # Run as root on the Pi, in this folder:   sh install.sh
 # (or from your computer: ./deploy.sh, which copies everything over and runs this)
@@ -13,7 +13,14 @@ cd "$(dirname "$0")"
 [ -f config.env ] || { echo "Copy config.env.example to config.env and fill it in first."; exit 1; }
 . ./config.env
 export SCOREBOARD_PORT TS_HOSTNAME TS_AUTHKEY TS_FUNNEL_PUBLIC TS_FUNNEL_PLAY
+export AD_VERSION AD_REINSTALL OPT_CLOCK_SYNC OPT_CPU_PERFORMANCE OPT_WIFI_POWERSAVE_OFF OPT_CAMERA_EXPOSURE \
+       OPT_DISABLE_BLUETOOTH OPT_FAST_BOOT OPT_OVERCLOCK OPT_STATUS_LOGIN
 on() { [ "$1" = yes ]; }
+
+if on "$INSTALL_AUTODARTS"; then
+  echo "##### Autodarts board"
+  sh scripts/autodarts-install.sh
+fi
 
 echo "##### Scoreboard"
 sh scripts/scoreboard-install.sh
