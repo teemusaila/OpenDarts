@@ -448,6 +448,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--glow); outl
     <p class="hint">Address of the Autodarts board service. Usually the Pi's address with port 3180.</p>
     <div class="row" style="margin-top:10px">
       <button class="chip" id="opt-voice" aria-pressed="true">Score caller on</button>
+      <button class="chip" id="opt-voice-test">Test voice</button>
       <button class="chip" id="opt-tips" aria-pressed="true">Throw tips on</button>
       <button class="chip" id="opt-awake" aria-pressed="true">Keep screen on</button>
       <button class="chip" id="btn-settings" hidden>Settings: users, lights, game lock</button>
@@ -1236,9 +1237,36 @@ function onBoard(changed) {
 }
 
 // ================= caller =================
-function speak(text) {
-  if (quiet || !text || !store.get('voice', true) || !('speechSynthesis' in window)) return;
-  try { const u = new SpeechSynthesisUtterance(text); u.rate = 0.95; speechSynthesis.cancel(); speechSynthesis.speak(u); } catch {}
+// iPhones and iPads only speak after speech was started from a tap; later calls from timers (darts
+// detected) are then allowed. So the first tap anywhere speaks a silent word, and cancel() is never
+// followed straight away by speak(), which iOS drops.
+let speechUnlocked = false;
+function unlockSpeech() {
+  if (speechUnlocked || !('speechSynthesis' in window)) return;
+  try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); speechUnlocked = true; } catch {}
+}
+document.addEventListener('click', unlockSpeech, true);
+document.addEventListener('touchend', unlockSpeech, true);
+let speechVoice = null;
+function pickVoice() {
+  try {
+    const vs = speechSynthesis.getVoices();
+    speechVoice = vs.find((v) => /^en[-_]GB/i.test(v.lang)) || vs.find((v) => /^en/i.test(v.lang)) || null;
+  } catch {}
+}
+if ('speechSynthesis' in window) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+function speak(text, force) {
+  if ((quiet && !force) || !text || !('speechSynthesis' in window) || (!force && !store.get('voice', true))) return;
+  try {
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 0.95; u.lang = speechVoice ? speechVoice.lang : 'en-GB';
+    if (speechVoice) u.voice = speechVoice;
+    if (speechSynthesis.speaking || speechSynthesis.pending) {
+      speechSynthesis.cancel();
+      setTimeout(() => speechSynthesis.speak(u), 80);
+    } else speechSynthesis.speak(u);
+    speechSynthesis.resume();   // Safari sometimes leaves speech paused after the page was in the background
+  } catch {}
 }
 
 // ================= rendering =================
@@ -1914,7 +1942,8 @@ $('btn-manage').onclick = () => {
   if (open && !roster.length) $('add-name').focus();
 };
 $('api-save').onclick = () => { store.set('api', $('api').value.trim().replace(/\/$/, '')); poll(); };
-$('opt-voice').onclick = () => { store.set('voice', !store.get('voice', true)); renderSetup(); };
+$('opt-voice').onclick = () => { store.set('voice', !store.get('voice', true)); renderSetup(); if (store.get('voice', true)) speak('Score caller on', true); };
+$('opt-voice-test').onclick = () => speak('One hundred and eighty!', true);
 $('opt-tips').onclick = () => { store.set('tips', !tipsOn()); renderSetup(); };
 $('opt-awake').onclick = () => { store.set('awake', !awakeOn()); renderSetup(); };
 $('start').onclick = async () => {
