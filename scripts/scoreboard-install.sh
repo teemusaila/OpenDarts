@@ -1110,7 +1110,10 @@ async function poll() {
     const changed = darts.length !== api.darts.length || darts.some((d, i) => d.name !== api.darts[i].name);
     api.darts = darts;
     if (darts.length === 0 && ignoreUntilClear) ignoreUntilClear = false;
-    const mine = G && !G.over && !lockedByOther();
+    // Only the game on screen takes darts, and only for the user holding the board.
+    const playing = $('game').classList.contains('on') || passiveMode === 'local';
+    const mine = G && !G.over && !lockedByOther() && playing;
+    if (mine && s.running === false && /stopped/i.test(api.status) && Date.now() - lastStartTry > 10000) startBoard();
     if (mine && !ignoreUntilClear && darts.length) G.visit.seen = darts.slice(0, 3);
     if (mine) onBoard(changed);
   } catch (e) {
@@ -1245,7 +1248,7 @@ function showWin(match, name) {
   const acts = $('banner-actions'); acts.innerHTML = '';
   const add = (label, fn) => { const b = document.createElement('button'); b.className = 'chip'; b.textContent = label; b.onclick = fn; acts.appendChild(b); };
   if (match) {
-    add('Rematch', async () => { if (!(await takeBoard())) return; G = newGame(G.cfg); ignoreUntilClear = api.darts.length > 0; resetBoard(); pingLights(); hideBanner(); save(); render(); });
+    add('Rematch', async () => { if (!(await takeBoard())) return; G = newGame(G.cfg); ignoreUntilClear = api.darts.length > 0; startBoard().then(resetBoard); pingLights(); hideBanner(); save(); render(); });
     add('New game', () => { hideBanner(); toSetup(); });
     add('Undo last visit', undoOwned);
   } else {
@@ -1729,15 +1732,25 @@ $('start').onclick = async () => {
   roster.forEach((r) => { if (picked.includes(r.name)) r.games = (r.games || 0) + 1; });
   savePlayers();
   ignoreUntilClear = api.darts.length > 0; saidForVisit = false;
-  resetBoard(); pingLights();
+  startBoard().then(resetBoard); pingLights();
   save(); toGame();
 };
-$('resume').onclick = async () => { if (!(await takeBoard())) return; pingLights(); G = store.get('game', null); ignoreUntilClear = api.darts.length > 0; toGame(); };
+$('resume').onclick = async () => { if (!(await takeBoard())) return; pingLights(); startBoard(); G = store.get('game', null); ignoreUntilClear = api.darts.length > 0; toGame(); };
 $('btn-undo').onclick = undoOwned;
 // Undo after the match ended reopens the game, so the board must be taken back first.
 async function undoOwned() { if (G && G.over && !(await takeBoard())) return; undo(); }
 // Asks the board service to reset (clears the current throws). Best effort: older or newer
 // board versions may use a different endpoint; the scoreboard works without it.
+// Starts the board's detection. Autodarts stays stopped until something starts it (autodarts.io
+// does this for its own games) and stops again after its standby time without throws.
+let lastStartTry = 0;
+async function startBoard() {
+  lastStartTry = Date.now();
+  try {
+    if (viaPi()) await fetch('cgi-bin/board', { method: 'POST', body: 'start' });
+    else await fetch(apiBase() + '/api/start', { method: 'PUT' });
+  } catch {}
+}
 async function resetBoard() {
   try { await fetch(viaPi() ? 'cgi-bin/board' : apiBase() + '/api/reset', { method: 'POST' }); } catch {}
 }
@@ -1832,14 +1845,23 @@ if [ -f "$F" ]; then cat "$F"; else echo '{"none":true}'; fi
 EOF_GAME
 cat > "$DIR/cgi-bin/board" <<'EOF_BOARD'
 #!/bin/sh
-# Board access for pages opened over HTTPS (the internet link): state (GET) and reset (POST) only.
-# Reset is allowed only for the user holding the game lock.
+# Board access for pages opened over HTTPS (the internet link): state (GET); POST "start" starts
+# the board, any other POST resets it. Start and reset are allowed only for the game lock holder.
 printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
 if [ "$REQUEST_METHOD" = POST ]; then
   . /data/scoreboard-auth/lock.sh
+  len=${CONTENT_LENGTH:-0}
+  case "$len" in ''|*[!0-9]*) len=0 ;; esac
+  [ "$len" -le 16 ] || len=16
+  act=$(head -c "$len")
   lock_mutex
   may_write || { echo '{"ok":false,"locked":true}'; exit 0; }
-  wget -qO /dev/null -T 3 --post-data= http://127.0.0.1:3180/api/reset 2>/dev/null
+  if [ "$act" = start ]; then
+    # The board API starts on PUT, which busybox wget can't send.
+    printf 'PUT /api/start HTTP/1.0\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n' | nc -w 5 127.0.0.1 3180 >/dev/null 2>&1
+  else
+    wget -qO /dev/null -T 3 --post-data= http://127.0.0.1:3180/api/reset 2>/dev/null
+  fi
   echo '{"ok":true}'
   exit 0
 fi
