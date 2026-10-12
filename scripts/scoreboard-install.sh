@@ -489,6 +489,17 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--glow); outl
   </div>
 
   <div class="sgroup">
+    <h2>Secure address (HTTPS)</h2>
+    <p class="hint">When set, devices that open the home address are sent here, so sign-in and the
+      keep-screen-on feature use HTTPS. Empty: no redirect. If the internet is down, open the home
+      address with <b>?local</b> at the end.</p>
+    <form class="sform" id="secure-form">
+      <label>Address <input name="url" type="url" placeholder="https://name.tailnet.ts.net/play/" style="width:22em"></label>
+      <button class="chip" type="submit">Save</button>
+    </form>
+  </div>
+
+  <div class="sgroup">
     <h2>Game lock</h2>
     <form class="sform" id="lock-form">
       <label>Release an unused lock after, hours <input name="hours" type="number" min="1" max="48" required></label>
@@ -1543,6 +1554,7 @@ const lockedByOther = () => !!me.owner && me.owner !== me.user;
 async function lockCall(action) {
   try {
     const res = await fetch('cgi-bin/lock', action ? { method: 'POST', body: action } : { cache: 'no-store' });
+    if (res.status === 401) { goSignIn(); return false; }
     if (!res.ok) return true;              // older Pi without the lock: behave as before
     const d = await res.json();
     me = { user: d.me || '', owner: d.owner || '', admin: !!d.admin };
@@ -1565,6 +1577,15 @@ function applyLock() {
   w.textContent = me.user ? `Signed in as ${me.user}${me.admin ? ' (admin)' : ''}${me.owner === me.user ? ' · the board is yours until the game ends' : ''}` : '';
 }
 async function lockWatch() { await lockCall(); applyLock(); }
+// The page loads without a password; the data needs one. The browser asks for it when a page under
+// cgi-bin/ is opened, so go there once and come back (keeping e.g. #passive).
+let signingIn = false;
+function goSignIn() {
+  if (signingIn || window.PUBLIC_VIEW) return;
+  signingIn = true;
+  try { sessionStorage.setItem('afterLogin', location.hash); } catch {}
+  location.href = 'cgi-bin/login';
+}
 // Sign out. Browsers keep a sign-in until the tab is closed and offer no way to drop it, so the page
 // signs in once more with a name that doesn't exist: the browser replaces the saved sign-in with it
 // and asks for a name and password on the next load.
@@ -1576,7 +1597,7 @@ async function signOut() {
     x.open('GET', 'cgi-bin/lock?signout=' + Date.now(), true, 'signed-out', 'x' + Date.now());
     x.onloadend = done; x.send();
   });
-  location.replace(location.pathname + '?signed-out=' + Date.now());
+  goSignIn();
 }
 // Takes the board for this user; false (and the view-only screen) if someone else has it.
 async function takeBoard() {
@@ -1613,6 +1634,7 @@ function renderSettings(d) {
   $('users-note').textContent = d.users.length
     ? 'Everyone signs in with these names. Admins can open this page and force-unlock a game.'
     : 'Sign-in is off: anyone on your network can use the scoreboard. Add a user to turn it on (the first user is admin).';
+  $('secure-form').closest('.sgroup').hidden = !d.users.length && !d.secure_url;
   d.users.forEach((u) => {
     const li = document.createElement('li');
     const self = u.name === d.me;
@@ -1655,6 +1677,7 @@ function renderSettings(d) {
     });
   }
   $('lock-form').hours.value = d.lock_hours;
+  $('secure-form').url.value = d.secure_url || '';
 }
 async function openSettings() {
   smsg('');
@@ -1679,6 +1702,11 @@ $('lights-form').onsubmit = async (e) => {
   const r = await settingsCall({ action: 'lights_save', device_id: f.device_id.value, ip: f.ip.value, local_key: f.local_key.value,
     version: f.version.value, idle_minutes: f.idle_minutes.value, no_score_minutes: f.no_score_minutes.value });
   if (r) { renderSettings(r); smsg('Lights saved.'); }
+};
+$('secure-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const r = await settingsCall({ action: 'secure_url', url: e.target.url.value.trim() });
+  if (r) { renderSettings(r); smsg(r.secure_url ? 'Secure address saved. Devices on the home network are now sent there.' : 'Secure address removed.'); }
 };
 $('lock-form').onsubmit = async (e) => {
   e.preventDefault();
@@ -1966,10 +1994,26 @@ rm -f "$DIR/index.html"
 mkdir -p "$DIR/cgi-bin"
 cat > "$DIR/cgi-bin/index.cgi" <<'EOF_INDEX'
 #!/bin/sh
+# The page. When a secure address is set (Settings), visitors on the home network are sent there;
+# requests through Tailscale arrive from the Pi itself and get the page. "?local" stays here, for
+# when the internet is down.
+SECURE=$(sed -n 's/^SECURE_URL=//p' /data/scoreboard/data/settings 2>/dev/null | head -1)
+case "$REMOTE_ADDR" in *127.0.0.1*|*'::1'*) SECURE= ;; esac
+case "&$QUERY_STRING&" in *'&local&'*|*'&local='*) SECURE= ;; esac
+if [ -n "$SECURE" ]; then
+  printf 'HTTP/1.1 302 Found\r\nLocation: %s\r\nCache-Control: no-cache\r\nContent-Length: 0\r\n\r\n' "$SECURE"
+  exit 0
+fi
 printf 'Content-Type: text/html; charset=utf-8\r\nCache-Control: no-cache\r\n\r\n'
 cat ../app.html
 EOF_INDEX
-chmod 755 "$DIR" "$DIR/cgi-bin" "$DIR/cgi-bin/index.cgi"; chmod 644 "$DIR/app.html" "$DIR/build"
+# Sign-in page: the browser asks for name and password here (it is under /cgi-bin), then goes back.
+cat > "$DIR/cgi-bin/login" <<'EOF_LOGIN'
+#!/bin/sh
+printf 'Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n\r\n'
+echo '<!doctype html><meta charset="utf-8"><title>Signed in</title><script>location.replace("../" + (sessionStorage.getItem("afterLogin") || ""))</script><a href="../">Continue</a>'
+EOF_LOGIN
+chmod 755 "$DIR" "$DIR/cgi-bin" "$DIR/cgi-bin/index.cgi" "$DIR/cgi-bin/login"; chmod 644 "$DIR/app.html" "$DIR/build"
 
 echo "== Shared player list"
 mkdir -p "$DIR/cgi-bin" "$DIR/data"
@@ -2056,15 +2100,16 @@ SET=/data/scoreboard/data/settings
 LPY=/data/lights/venv/bin/python; LCONF=/data/lights/config.json; LMODE=/data/lights/mode
 printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
 fail() { printf '{"ok":false,"error":"%s"}\n' "$1"; exit 0; }
-users() { sed -n 's#^/:\([^:]*\):.*#\1#p' "$CONF"; }
+users() { sed -n 's#^/cgi-bin:\([^:]*\):.*#\1#p' "$CONF"; }
 nusers=$(users | grep -c .)
 if [ "$nusers" -gt 0 ]; then
   is_admin || fail "Only admins can change settings."
 else
-  case "$REMOTE_ADDR" in 127.*|::1|::ffff:127.*) fail "Add the first user from the home network." ;; esac
+  case "$REMOTE_ADDR" in *127.0.0.1*|*'::1'*) fail "Add the first user from the home network." ;; esac
 fi
 reload() { pkill -HUP -f "httpd -f -p [0-9]* -h /data/scoreboard -c" 2>/dev/null; }
 set_file() { cat > /tmp/sb-set.$$ && cat /tmp/sb-set.$$ > "$1"; rm -f /tmp/sb-set.$$; }
+set_setting() { { grep -v "^$1=" "$SET" 2>/dev/null; [ -n "$2" ] && echo "$1=$2"; } | set_file "$SET"; }
 
 if [ "$REQUEST_METHOD" = POST ]; then
   len=${CONTENT_LENGTH:-0}
@@ -2083,7 +2128,7 @@ if [ "$REQUEST_METHOD" = POST ]; then
       if users | grep -qx "$name"; then [ "$act" = user_add ] && fail "$name already exists."
       else [ "$act" = user_pw ] && fail "No user $name."; fi
       h=$(httpd -m "$pw")
-      { grep -v "^/:$name:" "$CONF"; echo "/:$name:$h"; } | set_file "$CONF"
+      { grep -v "^/cgi-bin:$name:" "$CONF"; echo "/cgi-bin:$name:$h"; } | set_file "$CONF"
       if [ "$act" = user_add ] && { [ "$nusers" -eq 0 ] || [ "$(get admin)" = 1 ]; }; then
         grep -qx "$name" "$ADM" || echo "$name" >> "$ADM"
       fi
@@ -2092,7 +2137,7 @@ if [ "$REQUEST_METHOD" = POST ]; then
       users | grep -qx "$name" || fail "No user $name."
       [ "$name" = "$ME" ] && fail "You can't remove yourself."
       grep -qx "$name" "$ADM" && [ "$(grep -c . "$ADM")" -le 1 ] && fail "Keep at least one admin."
-      grep -v "^/:$name:" "$CONF" | set_file "$CONF"
+      grep -v "^/cgi-bin:$name:" "$CONF" | set_file "$CONF"
       grep -vx "$name" "$ADM" | set_file "$ADM"
       reload ;;
     user_admin)
@@ -2139,7 +2184,13 @@ PY
       h=$(get hours)
       case "$h" in ''|*[!0-9]*) fail "Hours must be 1 to 48." ;; esac
       [ "$h" -ge 1 ] && [ "$h" -le 48 ] || fail "Hours must be 1 to 48."
-      echo "LOCK_HOURS=$h" | set_file "$SET" ;;
+      set_setting LOCK_HOURS "$h" ;;
+    secure_url)
+      u=$(get url)
+      if [ -n "$u" ]; then
+        printf '%s' "$u" | grep -qE '^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/-]*)?$' || fail "Use an https:// address, e.g. https://name.tailnet.ts.net/play/"
+      fi
+      set_setting SECURE_URL "$u" ;;
     *) fail "Unknown action." ;;
   esac
 fi
@@ -2170,7 +2221,8 @@ PY
 ) || lights='{"installed":false}'
 fi
 hours=$(sed -n 's/^LOCK_HOURS=\([0-9]\{1,2\}\)$/\1/p' "$SET" 2>/dev/null)
-printf '],"lights":%s,"lock_hours":%s}\n' "$lights" "${hours:-3}"
+secure=$(sed -n 's/^SECURE_URL=//p' "$SET" 2>/dev/null | head -1)
+printf '],"lights":%s,"lock_hours":%s,"secure_url":"%s"}\n' "$lights" "${hours:-3}" "$secure"
 EOF_SET
 cat > "$DIR/cgi-bin/lock" <<'EOF_LOCK'
 #!/bin/sh
@@ -2207,6 +2259,9 @@ chown -R nobody "$DIR/data"
 echo "== Sign-in and game lock"
 mkdir -p "$AUTH"
 [ -f "$AUTH/httpd.conf" ] || : > "$AUTH/httpd.conf"
+# Sign-in covers /cgi-bin (all data and actions). The page itself holds no secrets, so it can send
+# home-network visitors to the HTTPS address before any password is typed. Older installs used "/".
+sed -i 's#^/:#/cgi-bin:#' "$AUTH/httpd.conf"
 [ -f "$AUTH/admins" ] || : > "$AUTH/admins"
 cat > "$AUTH/lock.sh" <<'EOF_LIB'
 # Sourced by the scoreboard CGIs. The game lock is one line "EPOCH USER" in $LOCK.
@@ -2246,7 +2301,7 @@ CONF=$AUTH/httpd.conf
 ADM=$AUTH/admins
 [ "$(id -u)" = 0 ] || { echo "Run as root."; exit 1; }
 name_ok() { echo "$1" | grep -qE '^[A-Za-z0-9_.-]{1,24}$' || { echo "Name: 1-24 letters, digits, _ . -"; exit 1; }; }
-has() { grep -q "^/:$1:" "$CONF"; }
+has() { grep -q "^/cgi-bin:$1:" "$CONF"; }
 reload() { rc-service scoreboard restart >/dev/null 2>&1; }
 ask_pw() {
   while :; do
@@ -2262,24 +2317,24 @@ ask_pw() {
 set_pw() {
   ask_pw "$1"
   h=$(httpd -m "$PW"); unset PW p1 p2
-  grep -v "^/:$1:" "$CONF" > "$CONF.new"; echo "/:$1:$h" >> "$CONF.new"
+  grep -v "^/cgi-bin:$1:" "$CONF" > "$CONF.new"; echo "/cgi-bin:$1:$h" >> "$CONF.new"
   cat "$CONF.new" > "$CONF"; rm -f "$CONF.new"
 }
 case "$1" in
   add)    name_ok "$2"; has "$2" && { echo "$2 exists; use passwd."; exit 1; }
-          first=; grep -q '^/:' "$CONF" || first=1
+          first=; grep -q '^/cgi-bin:' "$CONF" || first=1
           set_pw "$2"; [ -n "$first" ] && { echo "$2" >> "$ADM"; echo "$2 is admin (first user)."; }
           reload; echo "Added $2." ;;
   passwd) name_ok "$2"; has "$2" || { echo "No user $2."; exit 1; }; set_pw "$2"; reload; echo "Password changed." ;;
   del)    name_ok "$2"; has "$2" || { echo "No user $2."; exit 1; }
-          grep -v "^/:$2:" "$CONF" > "$CONF.new"; cat "$CONF.new" > "$CONF"; rm -f "$CONF.new"
+          grep -v "^/cgi-bin:$2:" "$CONF" > "$CONF.new"; cat "$CONF.new" > "$CONF"; rm -f "$CONF.new"
           grep -vx "$2" "$ADM" > "$ADM.new"; cat "$ADM.new" > "$ADM"; rm -f "$ADM.new"
           reload; echo "Removed $2."
-          grep -q '^/:' "$CONF" || echo "No users left: the scoreboard is open without sign-in." ;;
+          grep -q '^/cgi-bin:' "$CONF" || echo "No users left: the scoreboard is open without sign-in." ;;
   admin)  name_ok "$2"; has "$2" || { echo "No user $2."; exit 1; }
           if grep -qx "$2" "$ADM"; then grep -vx "$2" "$ADM" > "$ADM.new"; cat "$ADM.new" > "$ADM"; rm -f "$ADM.new"; echo "$2 is no longer admin."
           else echo "$2" >> "$ADM"; echo "$2 is admin."; fi ;;
-  list)   sed -n 's#^/:\([^:]*\):.*#\1#p' "$CONF" | while read -r u; do grep -qx "$u" "$ADM" && echo "* $u" || echo "  $u"; done ;;
+  list)   sed -n 's#^/cgi-bin:\([^:]*\):.*#\1#p' "$CONF" | while read -r u; do grep -qx "$u" "$ADM" && echo "* $u" || echo "  $u"; done ;;
   unlock) rm -f /data/scoreboard/data/lock; echo "Game lock released." ;;
   *)      sed -n '2,9s/^# \{0,1\}//p' "$0"; exit 1 ;;
 esac
@@ -2317,8 +2372,8 @@ if wget -S -qO /dev/null "http://127.0.0.1:$PORT/" 2>&1 | grep -qE "HTTP/1.[01] 
   IP=$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
   echo
   echo "Done. Open http://${IP:-<pi-address>}:$PORT on your tablet, phone or TV."
-  if grep -q '^/:' "$AUTH/httpd.conf"; then
-    echo "Sign-in is on for: $(sed -n 's#^/:\([^:]*\):.*#\1#p' "$AUTH/httpd.conf" | tr '\n' ' ')"
+  if grep -q '^/cgi-bin:' "$AUTH/httpd.conf"; then
+    echo "Sign-in is on for: $(sed -n 's#^/cgi-bin:\([^:]*\):.*#\1#p' "$AUTH/httpd.conf" | tr '\n' ' ')"
   else
     echo "Sign-in is OFF until you add a user:  scoreboard-user add NAME"
   fi

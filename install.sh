@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 [ "$(id -u)" = 0 ] || { echo "Run as root."; exit 1; }
 [ -f config.env ] || { echo "Copy config.env.example to config.env and fill it in first."; exit 1; }
 . ./config.env
-export SCOREBOARD_PORT TS_HOSTNAME TS_AUTHKEY TS_FUNNEL_PUBLIC TS_FUNNEL_PLAY
+export SCOREBOARD_PORT TS_HOSTNAME TS_AUTHKEY TS_FUNNEL_PUBLIC TS_FUNNEL_PLAY TS_HTTPS_REDIRECT
 export AD_VERSION AD_REINSTALL OPT_CLOCK_SYNC OPT_CPU_PERFORMANCE OPT_WIFI_POWERSAVE_OFF OPT_CAMERA_EXPOSURE \
        OPT_DISABLE_BLUETOOTH OPT_FAST_BOOT OPT_OVERCLOCK OPT_STATUS_LOGIN
 on() { [ "$1" = yes ]; }
@@ -25,7 +25,7 @@ fi
 echo "##### Scoreboard"
 sh scripts/scoreboard-install.sh
 
-if [ -n "$SCOREBOARD_ADMIN_USER" ] && ! grep -q '^/:' /data/scoreboard-auth/httpd.conf; then
+if [ -n "$SCOREBOARD_ADMIN_USER" ] && ! grep -q '^/cgi-bin:' /data/scoreboard-auth/httpd.conf; then
   echo "##### First user: $SCOREBOARD_ADMIN_USER"
   if [ -n "$SCOREBOARD_ADMIN_PASSWORD" ]; then
     printf '%s\n%s\n' "$SCOREBOARD_ADMIN_PASSWORD" "$SCOREBOARD_ADMIN_PASSWORD" | scoreboard-user add "$SCOREBOARD_ADMIN_USER"
@@ -73,4 +73,4 @@ fi
 
 echo
 echo "All done."
-grep -q '^/:' /data/scoreboard-auth/httpd.conf || echo "Sign-in is off. Add a user to turn it on:  scoreboard-user add NAME"
+grep -q '^/cgi-bin:' /data/scoreboard-auth/httpd.conf || echo "Sign-in is off. Add a user to turn it on:  scoreboard-user add NAME"

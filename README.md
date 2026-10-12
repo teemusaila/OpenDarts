@@ -135,6 +135,8 @@ anyone on the home network can open it to create the first user.
 - **Lights:** plug device ID, IP address, local key, protocol version, both switch-off times, and
   automatic / always on / always off. Changes apply within a few seconds.
 - **Game lock:** how long an unused lock lasts before it is released (default 3 hours).
+- **Secure address (HTTPS):** where devices on the home network are sent, e.g. the Tailscale
+  `/play/` address. Empty: no redirect.
 
 Per-device options (score caller, board address) are in the menu itself.
 
@@ -242,6 +244,7 @@ Settings in `config.env`:
 | `TS_AUTHKEY` | empty | **Secret, optional.** A Tailscale auth key (`tskey-auth-…`) to log in without a browser. Empty: the install prints a login link and waits. |
 | `TS_FUNNEL_PUBLIC` | `yes` | Public read-only view at `https://<name>.<tailnet>.ts.net/`. Needs `INSTALL_PUBLIC_VIEW=yes`. |
 | `TS_FUNNEL_PLAY` | `no` | Full scoreboard with sign-in at `/play/`. Only enabled if at least one scoreboard user exists. |
+| `TS_HTTPS_REDIRECT` | `yes` | With `/play/` on: devices that open the home address are sent to the HTTPS address, so sign-in is encrypted and *Keep screen on* works. Open `http://<pi-address>:8080/?local` to stay on the home address (e.g. when the internet is down). Changeable later on the Settings page (*Secure address*). |
 
 Then:
 
@@ -258,8 +261,9 @@ for a scoreboard sign-in, so create users with strong passwords before enabling 
 
 ## Security notes
 
-- The scoreboard uses HTTP Basic sign-in. On the home network this is plain HTTP; through
-  Tailscale it is HTTPS.
+- The scoreboard uses HTTP Basic sign-in for its data (`/cgi-bin/`); the page itself holds no
+  secrets. On the home network this is plain HTTP unless a secure address is set (then visitors are
+  sent to HTTPS before signing in); through Tailscale it is HTTPS.
 - The Autodarts board service (port 3180) has no sign-in of its own. Don't expose it to the
   internet; the scoreboard reaches it through the Pi on HTTPS pages.
 - Passwords are stored hashed in `/data/scoreboard-auth/`. The plug key is stored in

@@ -7,6 +7,7 @@
 #   TS_AUTHKEY        optional auth key; without it the script prints a login link and waits
 #   TS_FUNNEL_PUBLIC  yes: public read-only view at https://<name>.<tailnet>.ts.net/
 #   TS_FUNNEL_PLAY    yes: full scoreboard with sign-in at /play/ (only if a scoreboard user exists)
+#   TS_HTTPS_REDIRECT yes: send home-network visitors to the /play/ HTTPS address (needs TS_FUNNEL_PLAY)
 # Login state is kept in /data/tailscale, so it survives reboots. Turn sharing off with:
 #   tailscale funnel --https=443 off
 
@@ -48,8 +49,15 @@ if [ "$TS_FUNNEL_PUBLIC" = yes ]; then
   fi
 fi
 if [ "$TS_FUNNEL_PLAY" = yes ]; then
-  if grep -q '^/:' /data/scoreboard-auth/httpd.conf 2>/dev/null; then
+  if grep -q '^/cgi-bin:' /data/scoreboard-auth/httpd.conf 2>/dev/null; then
     tailscale funnel --bg --https=443 --set-path /play "http://127.0.0.1:$PORT"
+    NAME=$(tailscale status --json --peers=false 2>/dev/null | sed -n 's/.*"DNSName": *"\([^"]*\)\.".*/\1/p' | head -1)
+    SET=/data/scoreboard/data/settings
+    if [ "$TS_HTTPS_REDIRECT" = yes ] && [ -n "$NAME" ]; then
+      { grep -v '^SECURE_URL=' "$SET" 2>/dev/null; echo "SECURE_URL=https://$NAME/play/"; } > /tmp/sb-set.$$
+      cat /tmp/sb-set.$$ > "$SET"; rm -f /tmp/sb-set.$$; chown nobody "$SET"
+      echo "Home-network visitors are now sent to https://$NAME/play/ (change it on the Settings page)."
+    fi
   else
     echo "Skipping /play: add a scoreboard user first (scoreboard-user add NAME). Without users it would be open to anyone."
   fi
