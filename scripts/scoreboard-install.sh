@@ -32,7 +32,7 @@ HTTPD=$(command -v httpd) || { echo "httpd not found after installing busybox-ex
 
 echo "== Writing the scoreboard to $DIR"
 mkdir -p "$DIR"
-cat > "$DIR/index.html" <<'EOF_OCHE'
+cat > "$DIR/app.html" <<'EOF_OCHE'
 <!doctype html>
 <html lang="en">
 <!-- Darts Scoreboard for AutoDarts. This code was generated with AI (Claude by Anthropic). MIT License. -->
@@ -258,6 +258,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--glow); outl
 .manage li .count { font-size: 14px; color: var(--wire); min-width: 4.5em; text-align: right; }
 .rule { color: var(--wire); font-size: 17px; margin: 10px 0 0; max-width: 62ch; line-height: 1.4; }
 .opt-group { margin-top: 16px; }
+.who .link { margin-left: 10px; font-size: inherit; padding: 0; }
 .rules { margin-top: 10px; max-width: 90ch; color: var(--wire); font-size: 16px; line-height: 1.4; }
 .rules summary { display: inline-block; cursor: pointer; padding: 5px 14px; border: 1px solid var(--line); border-radius: 999px; color: var(--sisal); font-size: 15px; list-style: none; }
 .rules summary::-webkit-details-marker { display: none; }
@@ -388,7 +389,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--glow); outl
 <!-- Setup -->
 <section id="setup" class="screen on" aria-labelledby="setup-title">
   <h1 id="setup-title">Darts Scoreboard</h1>
-  <p class="hint" id="who" hidden></p>
+  <p class="hint who" id="who-line" hidden><span id="who"></span> <button class="link" id="btn-logout">Sign out</button></p>
 
   <div>
     <h2>Players</h2>
@@ -447,6 +448,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--glow); outl
     <p class="hint">Address of the Autodarts board service. Usually the Pi's address with port 3180.</p>
     <div class="row" style="margin-top:10px">
       <button class="chip" id="opt-voice" aria-pressed="true">Score caller on</button>
+      <button class="chip" id="opt-tips" aria-pressed="true">Throw tips on</button>
+      <button class="chip" id="opt-awake" aria-pressed="true">Keep screen on</button>
       <button class="chip" id="btn-settings" hidden>Settings: users, lights, game lock</button>
     </div>
 
@@ -639,6 +642,72 @@ function checkout(r, dartsLeft) {
 const argmax = (arr) => { let best = -Infinity, idx = [], i = 0; for (const v of arr) { if (v > best) { best = v; idx = [i]; } else if (v === best) idx.push(i); i++; } return idx; };
 const argmin = (arr) => argmax(arr.map((v) => -v));
 
+// ================= throw tips =================
+// Suggestions for the player at the board, shown under their score. Per device: menu "Throw tips".
+const tipsOn = () => store.get('tips', true);
+const GOOD_LEAVES = [40, 32, 36, 16, 24, 20, 8, 12, 28, 50];   // leaves that finish on a favourite double
+const BOGEY = new Set([169, 168, 166, 165, 163, 162, 159]);    // no three-dart finish
+const SINGLES = [...Array.from({ length: 20 }, (_, k) => seg(20 - k, 1)), seg(25, 1)];
+const TREBLES_FIRST = [seg(20, 3), seg(19, 3), seg(18, 3), seg(17, 3), ...SINGLES];
+// X01 when no finish is possible with the darts left: score, or set up a good finish.
+// Tips are recalculated after every dart, so they only plan the next dart.
+const TREBLES = Array.from({ length: 20 }, (_, k) => seg(20 - k, 3));
+function x01Tip(r, dartsLeft) {
+  if (r > 170) {
+    // Score heavily, but don't leave a number that has no finish.
+    for (const t of [20, 19, 18]) { const leave = r - 3 * t; if (leave > 170 || !BOGEY.has(leave)) return `Aim T${t}`; }
+    return 'Aim T20';
+  }
+  const leaveWith = (darts, n) => darts.find((a) => value(a) === r - n);
+  const doubles = GOOD_LEAVES.filter((n) => n !== 50);
+  let a = null, left = 0;
+  // 1. a single that leaves a favourite double, 2. a treble that does, 3. any single that leaves a
+  // one-dart finish (biggest double first), 4. a two-dart finish, 5. just not a dead number.
+  for (const list of [SINGLES, TREBLES]) {
+    for (const n of doubles) { const d = leaveWith(list, n); if (d) { a = d; left = n; break; } }
+    if (a) break;
+  }
+  if (!a) for (const d of [...SINGLES].reverse()) { const n = r - value(d); if (n >= 2 && oneDart(n)) { a = d; left = n; break; } }
+  if (!a) for (const d of TREBLES_FIRST) { const n = r - value(d); if (n >= 2 && n <= 110 && twoDarts(n)) { a = d; left = n; break; } }
+  if (!a) for (const d of TREBLES_FIRST) { const n = r - value(d); if (n >= 2 && !BOGEY.has(n)) { a = d; left = n; break; } }
+  if (!a) return 'Aim T20';
+  const d = oneDart(left);
+  return `Set up ${a.name}, leaves ${left}${d ? ' (' + d.name + ')' : ''}`;
+}
+// X01 straight out: any dart that reaches zero, else score.
+function straightOutTip(r) {
+  const all = [seg(25, 2), seg(25, 1), ...[3, 2, 1].flatMap((m) => Array.from({ length: 20 }, (_, k) => seg(20 - k, m)))];
+  const one = all.find((d) => value(d) === r);
+  return one ? `Finish ${one.name}` : r > 60 ? 'Aim T20' : `Aim ${r > 40 ? 'T' + Math.min(20, Math.floor(r / 3)) : 'S' + Math.min(20, r)}`;
+}
+// Cricket: score when it helps, close what opponents score on, else close the highest open number.
+function cricketTip(s, i) {
+  const me = s.p[i], others = s.p.filter((p, j) => j !== i), mode = s.o.mode;
+  const open = (p, t) => p.marks[t] < 3;
+  const aim = (t, why) => `Aim ${t === 25 ? 'Bull' : 'T' + t} · ${why}`;
+  if (mode !== 'none' && others.length) {
+    const pts = others.map((p) => p.pts);
+    const needPoints = mode === 'standard' ? me.pts <= Math.max(...pts) : me.pts >= Math.min(...pts);
+    const scoreOn = CRICKET.find((t) => !open(me, t) && others.some((p) => open(p, t)));
+    if (needPoints && scoreOn) return aim(scoreOn, mode === 'standard' ? 'score' : 'points to opponents');
+    const defend = CRICKET.find((t) => open(me, t) && others.some((p) => !open(p, t)));
+    if (defend) return aim(defend, 'close it');
+  }
+  const next = CRICKET.find((t) => open(me, t));
+  return next ? aim(next, 'close it') : '';
+}
+// Killer: become a killer, then go after the weakest opponent.
+function killerTip(s, i) {
+  const me = s.p[i];
+  if (me.lives <= 0) return '';
+  if (!me.killer) return `Aim D${me.num} to become a killer`;
+  const foes = s.p.map((p, j) => ({ p, j })).filter(({ p, j }) => j !== i && p.lives > 0)
+    .sort((a, b) => a.p.lives - b.p.lives || Number(b.p.killer) - Number(a.p.killer));
+  if (!foes.length) return '';
+  const name = G && G.cfg.players[foes[0].j] ? ` (${G.cfg.players[foes[0].j]})` : '';
+  return `Aim D${foes[0].p.num}${name}`;
+}
+
 // ================= games =================
 // Each game:  create(opts, n, prev) -> state
 //             play(state, i, darts, ctx) -> { s, stop, won, winner, bust, scored, call }
@@ -691,9 +760,11 @@ GAMES.x01 = {
     const p = s.p[i];
     const dl = ctx.active ? ctx.dartsLeft : 3;
     const route = s.o.out === 'double' && p.open && !ctx.bust ? checkout(p.rem, dl) : null;
+    const tip = ctx.active && !ctx.bust && tipsOn() && dl > 0
+      ? (!p.open ? ' · aim D20' : route ? '' : s.o.out === 'double' ? x01Tip(p.rem, dl) : straightOutTip(p.rem)) : '';
     return {
       big: p.rem,
-      hint: ctx.bust ? 'Bust' : !p.open ? 'Needs a double to start' : route ? route.map((d) => d.name).join(' ') : '',
+      hint: ctx.bust ? 'Bust' : !p.open ? 'Needs a double to start' + tip : route ? route.map((d) => d.name).join(' ') : tip,
       stats: `Avg ${p.darts ? (p.pts / p.darts * 3).toFixed(1) : '–'} · Darts ${p.legDarts}${p.maxes ? ' · 180s ' + p.maxes : ''}`,
     };
   },
@@ -740,11 +811,12 @@ GAMES.cricket = {
     me.totalMarks += marks; me.rounds++;
     return { s, scored: marks, call: marks ? `${marks} mark${marks > 1 ? 's' : ''}` : 'No score' };
   },
-  view(s, i) {
+  view(s, i, ctx) {
     const p = s.p[i];
     const rows = CRICKET.map((t) => `<span class="mk"><span class="t">${t === 25 ? 'Bull' : t}</span><span class="m${p.marks[t] >= 3 ? ' closed' : ''}">${markGlyph(p.marks[t])}</span></span>`).join('');
     return {
       big: s.o.mode === 'none' ? CRICKET.filter((t) => p.marks[t] >= 3).length + '/7' : p.pts,
+      hint: ctx && ctx.active && tipsOn() ? cricketTip(s, i) : '',
       extra: `<div class="marks">${rows}</div>`,
       stats: `Marks per round ${p.rounds ? (p.totalMarks / p.rounds).toFixed(2) : '–'}`,
     };
@@ -779,10 +851,16 @@ GAMES.clock = {
     p.darts += 3;
     return { s, scored: adv, call: adv ? `${adv} hit${adv > 1 ? 's' : ''}` : 'No score' };
   },
-  view(s, i) {
-    const p = s.p[i];
+  view(s, i, ctx) {
+    const p = s.p[i], o = s.o;
     const t = CLOCK[p.k];
-    return { big: t === 25 ? 'Bull' : t, hint: `${p.k} of 21 done`, stats: `Darts ${p.darts}` };
+    let tip = '';
+    if (ctx && ctx.active && tipsOn()) {
+      tip = t === 25 ? (o.hit === 'double' ? 'Aim Bull (inner)' : 'Aim Bull')
+        : o.hit === 'double' ? `Aim D${t}` : o.hit === 'treble' ? `Aim T${t}`
+        : o.skip ? `Aim T${t} (moves 3)` : `Aim ${t} (big single)`;
+    }
+    return { big: t === 25 ? 'Bull' : t, hint: tip ? `${tip} · ${p.k} of 21 done` : `${p.k} of 21 done`, stats: `Darts ${p.darts}` };
   },
 };
 
@@ -804,7 +882,10 @@ GAMES.shanghai = {
     if (kinds.size === 3) return { s, stop: true, won: true, scored, call: 'Shanghai!' };
     return { s, scored, call: scored ? String(scored) : 'No score' };
   },
-  view(s, i, ctx) { return { big: s.p[i].pts, hint: ctx.active ? `Aim at ${this.target(ctx.round)}` : '', stats: '' }; },
+  view(s, i, ctx) {
+    const t = this.target(ctx.round);
+    return { big: s.p[i].pts, hint: ctx.active ? (tipsOn() ? `Aim T${t} · S, D and T of ${t} = Shanghai` : `Aim at ${t}`) : '', stats: '' };
+  },
   roundEnd(s, round) {
     if (round < s.o.rounds) return null;
     const w = argmax(s.p.map((p) => p.pts));
@@ -825,7 +906,10 @@ GAMES.countup = {
     s.p[i].pts += scored; s.p[i].darts += 3;
     return { s, scored, call: scored === 180 ? 'One hundred and eighty!' : scored ? String(scored) : 'No score' };
   },
-  view(s, i) { const p = s.p[i]; return { big: p.pts, stats: `Avg ${p.darts ? (p.pts / p.darts * 3).toFixed(1) : '–'}` }; },
+  view(s, i, ctx) {
+    const p = s.p[i];
+    return { big: p.pts, hint: ctx && ctx.active && tipsOn() ? 'Aim T20' : '', stats: `Avg ${p.darts ? (p.pts / p.darts * 3).toFixed(1) : '–'}` };
+  },
   roundEnd(s, round) {
     if (round < s.o.rounds) return null;
     const w = argmax(s.p.map((p) => p.pts));
@@ -856,7 +940,11 @@ GAMES.halve = {
     if (ctx.final) { p.pts = Math.floor(p.pts / 2); return { s, scored: 0, call: 'Halved' }; }
     return { s, scored: 0 };
   },
-  view(s, i, ctx) { return { big: s.p[i].pts, hint: ctx.active ? `Aim at ${this.target(ctx.round).label}` : '' }; },
+  view(s, i, ctx) {
+    const t = this.target(ctx.round);
+    const best = { 'Any double': 'D20', 'Any treble': 'T20', Bull: 'Bull' }[t.label] || 'T' + t.label;
+    return { big: s.p[i].pts, hint: ctx.active ? (tipsOn() ? `${t.label}: aim ${best} · a miss halves` : `Aim at ${t.label}`) : '' };
+  },
   roundEnd(s, round) {
     if (round < HALVE.length) return null;
     const w = argmax(s.p.map((p) => p.pts));
@@ -925,9 +1013,10 @@ GAMES.killer = {
     return { s, scored: 0, call: call || 'No score' };
   },
   isOut: (s, i) => s.p[i].lives <= 0,
-  view(s, i) {
+  view(s, i, ctx) {
     const p = s.p[i];
-    return { big: p.num, hint: '●'.repeat(Math.max(p.lives, 0)) + '○'.repeat(Math.max(s.o.lives - Math.max(p.lives, 0), 0)), tag: p.lives <= 0 ? 'Out' : p.killer ? 'Killer' : '', stats: `Lives ${Math.max(p.lives, 0)}` };
+    const tip = ctx && ctx.active && tipsOn() ? killerTip(s, i) : '';
+    return { big: p.num, hint: '●'.repeat(Math.max(p.lives, 0)) + '○'.repeat(Math.max(s.o.lives - Math.max(p.lives, 0), 0)) + (tip ? ' · ' + tip : ''), tag: p.lives <= 0 ? 'Out' : p.killer ? 'Killer' : '', stats: `Lives ${Math.max(p.lives, 0)}` };
   },
 };
 
@@ -1371,7 +1460,7 @@ document.querySelectorAll('.dart').forEach((b) => b.onclick = () => G && !G.over
 // The device that scores publishes the game to the Pi (cgi-bin/game); a TV opened in passive mode
 // (#passive) reads it from there. The "Passive view" button shows the local game the same way.
 let passiveMode = null;       // null | 'local' | 'remote'
-let passiveTimer = null, wakeLock = null;
+let passiveTimer = null;
 let lastPublished = '', publishTimer = 0, publishedAt = 0;
 
 function buildPayload() {
@@ -1423,20 +1512,19 @@ async function pollPassive() {
     paintPassive(await res.json());
   } catch { $('p-stamp').textContent = 'Connection lost'; }
 }
-async function keepAwake() { try { wakeLock = await navigator.wakeLock.request('screen'); } catch {} }
 function showPassive(mode) {
   passiveMode = mode;
   $('p-exit').hidden = !!window.PUBLIC_VIEW || forcedView;
   $('setup').classList.remove('on'); $('game').classList.remove('on'); $('passive').classList.add('on');
   clearInterval(passiveTimer);
-  if (mode === 'remote') { pollPassive(); passiveTimer = setInterval(pollPassive, 700); keepAwake(); }
+  if (mode === 'remote') { pollPassive(); passiveTimer = setInterval(pollPassive, 700); }
   else paintPassive(buildPayload());
+  screenOn(true);
 }
 function exitPassive() {
   if (window.PUBLIC_VIEW) return;
   clearInterval(passiveTimer);
   const was = passiveMode; passiveMode = null;
-  try { if (wakeLock) wakeLock.release(); } catch {}
   $('passive').classList.remove('on');
   if (location.hash === '#passive') history.replaceState(null, '', location.pathname + location.search);
   if (was === 'local' && G) toGame(); else toSetup(true);
@@ -1472,11 +1560,24 @@ function applyLock() {
     if (forcedView) { forcedView = false; exitPassive(); }
   }
   const w = $('who');
-  w.hidden = !me.user;
+  $('who-line').hidden = !me.user;
   $('btn-settings').hidden = !!me.user && !me.admin;
   w.textContent = me.user ? `Signed in as ${me.user}${me.admin ? ' (admin)' : ''}${me.owner === me.user ? ' · the board is yours until the game ends' : ''}` : '';
 }
 async function lockWatch() { await lockCall(); applyLock(); }
+// Sign out. Browsers keep a sign-in until the tab is closed and offer no way to drop it, so the page
+// signs in once more with a name that doesn't exist: the browser replaces the saved sign-in with it
+// and asks for a name and password on the next load.
+async function signOut() {
+  if (me.owner && me.owner === me.user && G && !G.over && !confirm('Sign out? Your game stays locked to you until it ends or an admin unlocks it.')) return;
+  screenOn(false);
+  await new Promise((done) => {
+    const x = new XMLHttpRequest();
+    x.open('GET', 'cgi-bin/lock?signout=' + Date.now(), true, 'signed-out', 'x' + Date.now());
+    x.onloadend = done; x.send();
+  });
+  location.replace(location.pathname + '?signed-out=' + Date.now());
+}
 // Takes the board for this user; false (and the view-only screen) if someone else has it.
 async function takeBoard() {
   const ok = await lockCall('acquire');
@@ -1485,6 +1586,7 @@ async function takeBoard() {
   return ok;
 }
 function releaseBoard() { lockCall('release').then(applyLock); }
+$('btn-logout').onclick = signOut;
 $('p-unlock').onclick = async () => {
   if (!confirm(`Take the board from ${me.owner}? Their game stops updating here.`)) return;
   await lockCall('force'); applyLock();
@@ -1583,6 +1685,62 @@ $('lock-form').onsubmit = async (e) => {
   const r = await settingsCall({ action: 'lock_hours', hours: e.target.hours.value });
   if (r) { renderSettings(r); smsg('Game lock saved.'); }
 };
+
+// ================= keep the screen on =================
+// While a game is open the phone or tablet shouldn't go to sleep. HTTPS pages use the Wake Lock API.
+// Plain-http pages (the home address) can't, so a tiny muted looping video plays out of sight instead,
+// which keeps most phones awake. Per device: menu "Keep screen on".
+const AWAKE_VIDEO = 'data:video/mp4;base64,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bWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTQgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTI1MCBrZXlpbnRfbWluPTEgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjIwAIAAAAAPZYiEBfOf//8PRQABV5+AARggBwEYIAcBGCAHARggBwEYIAcBGCAHARggBwEYIAcAAAAHQZo4C+c6gAEYIAcBGCAHARggBwEYIAcBGCAHARggBwEYIAcBGCAH';
+let wakeSentinel = null, wakeVideo = null, screenWanted = false;
+const awakeOn = () => store.get('awake', true);
+async function screenOn(on) {
+  screenWanted = on && awakeOn();
+  if (!screenWanted) {
+    try { if (wakeSentinel) await wakeSentinel.release(); } catch {}
+    wakeSentinel = null;
+    if (wakeVideo) wakeVideo.pause();
+    return;
+  }
+  if ('wakeLock' in navigator && window.isSecureContext) {
+    try {
+      if (!wakeSentinel) {
+        wakeSentinel = await navigator.wakeLock.request('screen');
+        wakeSentinel.addEventListener('release', () => { wakeSentinel = null; });
+      }
+      return;
+    } catch {}
+  }
+  if (!wakeVideo) {
+    wakeVideo = document.createElement('video');
+    Object.assign(wakeVideo, { muted: true, loop: true, playsInline: true, src: AWAKE_VIDEO });
+    wakeVideo.setAttribute('playsinline', ''); wakeVideo.setAttribute('muted', ''); wakeVideo.setAttribute('aria-hidden', 'true');
+    wakeVideo.style.cssText = 'position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0.01;pointer-events:none';
+    document.body.appendChild(wakeVideo);
+  }
+  try { await wakeVideo.play(); } catch {}   // needs a tap on some phones; retried on the next one
+}
+// The browser drops the lock when the page is hidden, and some phones only play after a tap.
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && screenWanted) screenOn(true); });
+document.addEventListener('pointerdown', () => {
+  if (screenWanted && !wakeSentinel && (!wakeVideo || wakeVideo.paused)) screenOn(true);
+}, true);
+
+// ================= updates =================
+// The installer stamps BUILD into the page and writes the same value to the file "build". An open page
+// checks it every minute and reloads when a new version is installed, but never in the middle of a game.
+const BUILD = '__SCOREBOARD_BUILD__';
+let updateReady = false;
+const canReload = () => window.PUBLIC_VIEW || !($('game').classList.contains('on') || $('settings').classList.contains('on')
+  || $('pad').classList.contains('on') || (passiveMode === 'local'));
+async function checkUpdate() {
+  try {
+    const b = (await (await fetch('build', { cache: 'no-store' })).text()).trim();
+    if (/^[0-9a-f]{12}$/.test(b) && b !== BUILD) updateReady = true;
+  } catch {}
+  if (updateReady && canReload()) location.reload();
+}
+setInterval(checkUpdate, 60000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkUpdate(); });
 
 // ================= setup screen =================
 // Players list: shared on the Pi (cgi-bin/players), cached in this browser.
@@ -1704,6 +1862,10 @@ function renderSetup() {
   $('api').value = apiBase();
   $('opt-voice').setAttribute('aria-pressed', String(store.get('voice', true)));
   $('opt-voice').textContent = store.get('voice', true) ? 'Score caller on' : 'Score caller off';
+  $('opt-tips').setAttribute('aria-pressed', String(tipsOn()));
+  $('opt-tips').textContent = tipsOn() ? 'Throw tips on' : 'Throw tips off';
+  $('opt-awake').setAttribute('aria-pressed', String(awakeOn()));
+  $('opt-awake').textContent = awakeOn() ? 'Keep screen on' : 'Screen may sleep';
 }
 $('add-form').onsubmit = (e) => {
   e.preventDefault();
@@ -1725,8 +1887,11 @@ $('btn-manage').onclick = () => {
 };
 $('api-save').onclick = () => { store.set('api', $('api').value.trim().replace(/\/$/, '')); poll(); };
 $('opt-voice').onclick = () => { store.set('voice', !store.get('voice', true)); renderSetup(); };
+$('opt-tips').onclick = () => { store.set('tips', !tipsOn()); renderSetup(); };
+$('opt-awake').onclick = () => { store.set('awake', !awakeOn()); renderSetup(); };
 $('start').onclick = async () => {
-  if (!(await takeBoard())) return;
+  screenOn(true);
+  if (!(await takeBoard())) { screenOn(false); return; }
   G = newGame({ game: cfg.game, opts: gameOpts(cfg.game), legsToWin: cfg.legsToWin, players: picked.slice() });
   lastLineup = picked.slice();
   roster.forEach((r) => { if (picked.includes(r.name)) r.games = (r.games || 0) + 1; });
@@ -1735,7 +1900,7 @@ $('start').onclick = async () => {
   startBoard().then(resetBoard); pingLights();
   save(); toGame();
 };
-$('resume').onclick = async () => { if (!(await takeBoard())) return; pingLights(); startBoard(); G = store.get('game', null); ignoreUntilClear = api.darts.length > 0; toGame(); };
+$('resume').onclick = async () => { screenOn(true); if (!(await takeBoard())) { screenOn(false); return; } pingLights(); startBoard(); G = store.get('game', null); ignoreUntilClear = api.darts.length > 0; toGame(); };
 $('btn-undo').onclick = undoOwned;
 // Undo after the match ended reopens the game, so the board must be taken back first.
 async function undoOwned() { if (G && G.over && !(await takeBoard())) return; undo(); }
@@ -1762,8 +1927,10 @@ $('conn-text').ondblclick = () => $('raw').classList.toggle('on');
 function save() { if (G) store.set('game', G); }
 // Tells the Pi a game has started, so the lights come on even before the first dart.
 function pingLights() { try { fetch('cgi-bin/lights', { method: 'POST', keepalive: true }).catch(() => {}); } catch {} }
-function toGame() { $('setup').classList.remove('on'); $('game').classList.add('on'); render(); }
+function toGame() { $('setup').classList.remove('on'); $('game').classList.add('on'); render(); screenOn(true); }
 function toSetup(viewerOnly) {
+  if (updateReady) setTimeout(() => location.reload(), 300);   // a newer version was installed meanwhile
+  screenOn(false);
   $('game').classList.remove('on'); $('passive').classList.remove('on'); $('setup').classList.add('on'); renderSetup();
   if (viewerOnly) return;   // a display leaving passive mode must not clear the game it was showing
   if (lockedByOther()) return;
@@ -1790,7 +1957,19 @@ setInterval(renderConn, 1000);
 </body>
 </html>
 EOF_OCHE
-chmod 755 "$DIR"; chmod 644 "$DIR/index.html"
+# Served by cgi-bin/index.cgi with "Cache-Control: no-cache", so browsers always get the current
+# version (a plain file is cached for hours). The build stamp lets open pages notice an update.
+BUILD=$(md5sum "$DIR/app.html" | cut -c1-12)
+sed -i "s/__SCOREBOARD_BUILD__/$BUILD/" "$DIR/app.html"
+echo "$BUILD" > "$DIR/build"
+rm -f "$DIR/index.html"
+mkdir -p "$DIR/cgi-bin"
+cat > "$DIR/cgi-bin/index.cgi" <<'EOF_INDEX'
+#!/bin/sh
+printf 'Content-Type: text/html; charset=utf-8\r\nCache-Control: no-cache\r\n\r\n'
+cat ../app.html
+EOF_INDEX
+chmod 755 "$DIR" "$DIR/cgi-bin" "$DIR/cgi-bin/index.cgi"; chmod 644 "$DIR/app.html" "$DIR/build"
 
 echo "== Shared player list"
 mkdir -p "$DIR/cgi-bin" "$DIR/data"

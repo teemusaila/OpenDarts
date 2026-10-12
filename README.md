@@ -16,6 +16,8 @@ automatically from the board service; the page runs the games itself.
   rules for each game in the menu.
 - **Scoring:** checkout routes, a live dartboard of the round's hits, the last scores of each
   player, a spoken score caller, tap-to-correct, *Fix scores* for earlier visits, undo.
+- **Help at the board:** throw tips for every game (X01 set-ups and checkouts, Cricket, Killer and
+  more), and the screen stays on during a game.
 - **Displays:** a passive view for a TV (board, hits and the last 10 scores), scaled to any
   screen size, and a compact phone layout.
 - **Sign-in and game lock:** users with passwords; starting a game locks the board to that
@@ -141,7 +143,12 @@ Users can also be managed on the Pi with `scoreboard-user` (`add`, `passwd`, `de
 
 ## Using it
 
-- **Sign-in:** once a user exists, the browser asks for a name and password.
+- **Sign-in:** once a user exists, the browser asks for a name and password. *Sign out* is next
+  to your name in the menu.
+- **Keep screen on / Throw tips:** per-device switches in the menu. Keeping the screen on works
+  best over HTTPS (for example the Tailscale `/play/` link); on plain HTTP a silent video is used,
+  which works on most phones.
+- **Updates:** open pages reload themselves after an update, except in the middle of a game.
 - **Game lock:** starting a game locks the board to you. Others see your game read-only until the
   match ends or you press *End game*. An admin can force-unlock it.
 - **TV:** open the menu's *Open passive display*, or `http://<pi-address>:8080/#passive`.
@@ -266,7 +273,7 @@ for a scoreboard sign-in, so create users with strong passwords before enabling 
 | `127.0.0.1:8081` | Public read-only view (local only). |
 | `:3180` | Autodarts board service (no sign-in; keep it off the internet). |
 | `/data/autodarts` | Autodarts and the glibc shim. |
-| `/data/scoreboard` | Web page, CGI scripts, player list, game lock. |
+| `/data/scoreboard` | Web page (`app.html`, served uncached by `cgi-bin/index.cgi`), CGI scripts, player list, game lock. |
 | `/data/scoreboard-auth` | Users, admins. |
 | `/data/scoreboard-public` | Read-only copy. |
 | `/data/lights` | Lights service and its settings. |

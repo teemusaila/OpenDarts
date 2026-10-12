@@ -10,7 +10,7 @@
 # players list, no lights and no way to post a game. Re-run after every scoreboard update.
 
 set -e
-SRC=/data/scoreboard/index.html
+SRC=/data/scoreboard/app.html
 DIR=/data/scoreboard-public
 PORT=8081
 
@@ -20,8 +20,16 @@ HTTPD=$(command -v httpd) || { echo "httpd not found."; exit 1; }
 
 echo "== Writing the read-only copy to $DIR"
 mkdir -p "$DIR/cgi-bin"
-sed "s|<script>|<script>window.PUBLIC_VIEW = true;</script>\n<script>|" "$SRC" > "$DIR/index.html"
-grep -q 'window.PUBLIC_VIEW = true' "$DIR/index.html" || { echo "Could not mark the public copy."; exit 1; }
+sed "s|<script>|<script>window.PUBLIC_VIEW = true;</script>\n<script>|" "$SRC" > "$DIR/app.html"
+grep -q 'window.PUBLIC_VIEW = true' "$DIR/app.html" || { echo "Could not mark the public copy."; exit 1; }
+cp /data/scoreboard/build "$DIR/build"
+rm -f "$DIR/index.html"
+# Served without caching, like the scoreboard itself.
+cat > "$DIR/cgi-bin/index.cgi" <<'EOF_INDEX'
+#!/bin/sh
+printf 'Content-Type: text/html; charset=utf-8\r\nCache-Control: no-cache\r\n\r\n'
+cat ../app.html
+EOF_INDEX
 cat > "$DIR/cgi-bin/game" <<'EOF_GAME'
 #!/bin/sh
 # Read-only: returns the live game published by the scoring device. Ignores anything sent to it.
@@ -29,7 +37,7 @@ printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
 F=/tmp/scoreboard-game.json
 if [ -f "$F" ]; then cat "$F"; else echo '{"none":true}'; fi
 EOF_GAME
-chmod 755 "$DIR" "$DIR/cgi-bin" "$DIR/cgi-bin/game"; chmod 644 "$DIR/index.html"
+chmod 755 "$DIR" "$DIR/cgi-bin" "$DIR/cgi-bin/game" "$DIR/cgi-bin/index.cgi"; chmod 644 "$DIR/app.html" "$DIR/build"
 
 echo "== Creating the boot service"
 cat > /etc/init.d/scoreboard-public <<EOF
