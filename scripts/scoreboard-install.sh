@@ -2030,7 +2030,19 @@ SECURE=$(sed -n 's/^SECURE_URL=//p' /data/scoreboard/data/settings 2>/dev/null |
 case "$REMOTE_ADDR" in *127.0.0.1*|*'::1'*) SECURE= ;; esac
 case "&$QUERY_STRING&" in *'&local&'*|*'&local='*) SECURE= ;; esac
 if [ -n "$SECURE" ]; then
-  printf 'HTTP/1.1 302 Found\r\nLocation: %s\r\nCache-Control: no-cache\r\nContent-Length: 0\r\n\r\n' "$SECURE"
+  # Go to the secure address only if it answers (it needs the internet and Tailscale); otherwise stay
+  # here with ?local, so the scoreboard always opens.
+  printf 'Content-Type: text/html; charset=utf-8\r\nCache-Control: no-cache\r\n\r\n'
+  cat <<EOF_GO
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Darts</title><body style="margin:0;padding:32px;background:#04060d;color:#7d8db3;font:18px system-ui,sans-serif">Connecting…
+<script>
+var secure = '$SECURE', hash = location.hash, gone = false;
+function go(ok) { if (gone) return; gone = true; location.replace(ok ? secure + hash : location.pathname + '?local' + hash); }
+setTimeout(function () { go(false); }, 4000);
+fetch(secure + 'build?' + Date.now(), { mode: 'no-cors', cache: 'no-store' }).then(function () { go(true); }, function () { go(false); });
+</script>
+EOF_GO
   exit 0
 fi
 printf 'Content-Type: text/html; charset=utf-8\r\nCache-Control: no-cache\r\n\r\n'

@@ -71,6 +71,11 @@ if on "$INSTALL_TAILSCALE"; then
   sh scripts/tailscale-install.sh
 fi
 
+if on "$INSTALL_KEEPALIVE"; then
+  echo "##### Keep-alive check"
+  sh scripts/keepalive-install.sh
+fi
+
 echo
 echo "All done."
 grep -q '^/cgi-bin:' /data/scoreboard-auth/httpd.conf || echo "Sign-in is off. Add a user to turn it on:  scoreboard-user add NAME"

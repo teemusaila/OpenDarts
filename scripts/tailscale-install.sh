@@ -62,6 +62,9 @@ if [ "$TS_FUNNEL_PLAY" = yes ]; then
     echo "Skipping /play: add a scoreboard user first (scoreboard-user add NAME). Without users it would be open to anyone."
   fi
 fi
+# Routes the keep-alive check restores if they go missing (empty the file to stop sharing for good).
+mkdir -p /data/scoreboard/data
+tailscale funnel status 2>/dev/null | sed -n 's#^|-- \(/[^ ]*\) *proxy http://127\.0\.0\.1:\([0-9]*\)$#\1 \2#p' > /data/scoreboard/data/funnel-routes || true
 tailscale funnel status || true
 echo "If Tailscale printed a link to enable Funnel, open it, allow Funnel, and run this script again."
 echo "A new name can take a few minutes to appear in DNS."

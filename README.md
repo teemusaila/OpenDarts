@@ -195,6 +195,17 @@ A copy of the passive display that shows the running game but has no controls, n
 nothing that can change data. It listens only inside the Pi (`127.0.0.1:8081`); share it with
 Tailscale Funnel (below) or another tunnel.
 
+### Keep-alive (`INSTALL_KEEPALIVE`)
+
+`darts-keepalive` runs at boot and every 15 minutes. It starts or restarts the scoreboard, the public
+view, the lights and Autodarts if they have stopped or don't answer, and restores the Tailscale
+Funnel routes listed in `/data/scoreboard/data/funnel-routes` (for example `/ 8081` and
+`/play 8080`). To stop sharing for good, empty that file before turning Funnel off; otherwise the
+routes come back. Log: `/var/log/darts-keepalive.log`.
+
+If a secure address is set, the home address checks it first and only sends devices there when it
+answers; otherwise the scoreboard opens on the home address.
+
 ### Maintenance
 
 - **Backup:** `pi-backup` runs weekly and keeps five archives in `/data/backups`. They contain
