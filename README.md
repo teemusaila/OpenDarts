@@ -20,7 +20,8 @@ automatically from the board service; the page runs the games itself.
 - **Help at the board:** throw tips for every game (X01 set-ups and checkouts, Cricket, Killer and
   more), and the screen stays on during a game.
 - **Displays:** a passive view for a TV (board, hits and the last 10 scores), scaled to any
-  screen size, and a compact phone layout.
+  screen size, and a compact phone layout. The look is a dark steel HUD with cyan and orange
+  neon (Orbitron and Chakra Petch fonts from Google Fonts, system fonts when offline).
 - **Sign-in and game lock:** users with passwords; starting a game locks the board to that
   user until the match ends, others watch read-only.
 - **Settings page:** users, lights and the game lock are changed from the scoreboard itself.
@@ -219,6 +220,21 @@ A camera that reconnects also gets its fixed exposure back (`cam-setup`, run by 
 
 If a secure address is set, the home address checks it first and only sends devices there when it
 answers; otherwise the scoreboard opens on the home address.
+
+### Boot calibration (`scripts/calibrate-install.sh`)
+
+`darts-calibrate` runs 45 seconds after every boot: it starts the board, switches the lights on,
+waits 5 seconds, runs Autodarts' auto-calibration (`POST /api/config/calibration/auto`; Autodarts
+saves it in `calibration.json`), then stops the board and switches the lights off again. The
+previous calibration is kept as `calibration.json.before` and put back if the new one fails.
+Auto-calibration needs the internet. Log: `/data/logs/calibrate.log`. Run it by hand with
+`darts-calibrate`; turn it off at boot with `echo off > /data/autodarts/boot-calibration`.
+Needs the lights service (`lights-install.sh`) for the light steps; without it the lights steps
+are skipped.
+
+### Login banner (`scripts/login-banner-install.sh`)
+
+An ASCII-art AUTODARTS name and dartboard in `/etc/motd`, shown when you log in over SSH.
 
 ### Maintenance
 

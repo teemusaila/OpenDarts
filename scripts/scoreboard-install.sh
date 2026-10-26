@@ -41,22 +41,32 @@ cat > "$DIR/app.html" <<'EOF_OCHE'
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#04060d">
+<meta name="theme-color" content="#07090e">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Orbitron:wght@500;700;900&display=swap">
 <title>Darts Scoreboard</title>
 <style>
 :root {
   --z: 1;                  /* page scale, set by the script in <head> */
-  --cabinet: #0a0f1d;      /* panels */
-  --cabinet-deep: #04060d; /* night background */
-  --sisal: #e6f7ff;        /* main text, cool white */
-  --sisal-ink: #04060d;
-  --wire: #7d8db3;         /* secondary text */
-  --glow: #2ef2ff;         /* neon cyan: active player, focus */
-  --red: #ff3dbb;          /* neon magenta: bust, treble/double ring */
+  /* HUD theme: cold charcoal steel with electric cyan and molten orange */
+  --cabinet: #131a26;      /* panels */
+  --cabinet-deep: #07090e; /* canvas */
+  --surface: #0e131d;
+  --elevated: #1a2332;
+  --sisal: #e8f1f8;        /* main text, cool white */
+  --sisal-ink: #07090e;
+  --wire: #8497b3;         /* secondary text */
+  --glow: #00e5ff;         /* electric cyan: active player, focus */
+  --orange: #ff7a00;       /* molten orange: second accent, hover, multipliers */
+  --red: #ff5a36;          /* hot orange-red: bust */
   --green: #a4ff3a;        /* neon lime: checkout, closed */
-  --line: rgba(46, 242, 255, .16);
-  --halo: 0 0 6px rgba(46, 242, 255, .9), 0 0 22px rgba(46, 242, 255, .55), 0 0 48px rgba(46, 242, 255, .3);
-  --font: "Bahnschrift", "DIN Alternate", "Roboto Condensed", "Arial Narrow", system-ui, sans-serif;
+  --metal-dark: #222c3d;
+  --metal-light: #52637a;
+  --line: rgba(0, 229, 255, .2);
+  --halo: 0 0 6px rgba(0, 229, 255, .9), 0 0 22px rgba(0, 229, 255, .55), 0 0 48px rgba(0, 229, 255, .3);
+  --font-hud: "Orbitron", "Russo One", "Rajdhani", "Bahnschrift", system-ui, sans-serif;
+  --font: "Chakra Petch", "JetBrains Mono", "Bahnschrift", "DIN Alternate", "Roboto Condensed", system-ui, sans-serif;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -370,6 +380,118 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--glow); outl
   .total b { font-size: 32px; }
   .total span { font-size: 11px; }
 }
+
+/* ---------- HUD look: steel panels, cyan/orange corner lights, telemetry type ---------- */
+body {
+  background:
+    linear-gradient(to right, rgba(0, 229, 255, .05) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(to bottom, rgba(0, 229, 255, .05) 1px, transparent 1px) 0 0 / 24px 24px,
+    radial-gradient(120% 80% at 50% -10%, #101a2b 0%, var(--cabinet-deep) 62%) fixed, var(--cabinet-deep);
+}
+/* Metallic chrome titles */
+#setup h1, #settings h1, #fix h3, .banner h2 {
+  font-family: var(--font-hud); text-transform: uppercase; font-style: italic; font-weight: 900; letter-spacing: .02em;
+  background: linear-gradient(180deg, #ffffff 0%, #cbd5e1 45%, #475569 50%, #94a3b8 100%);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent;
+  text-shadow: none; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .9));
+}
+/* Target reticle in front of the main title */
+#setup h1::before {
+  content: ''; display: inline-block; width: .78em; height: .78em; margin-right: .3em; vertical-align: -.08em;
+  border-radius: 50%; border: 2px solid var(--glow); box-shadow: 0 0 12px rgba(0, 229, 255, .45);
+  background: linear-gradient(var(--glow), var(--glow)) center / 2px 100% no-repeat, linear-gradient(var(--glow), var(--glow)) center / 100% 2px no-repeat;
+  -webkit-text-fill-color: initial; outline: 1px dashed rgba(255, 122, 0, .75); outline-offset: 4px;
+}
+#setup h2, #settings h2, .opt-group h3 { font-family: var(--font-hud); font-size: .8em; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; color: var(--wire); }
+#setup h2::before, .opt-group h3::before { content: '◢ '; color: var(--orange); font-size: .8em; }
+.rules h3 { font-family: var(--font-hud); }
+
+/* Panels get the HUD frame: metal border, cyan light top-left, orange light bottom-right */
+.sgroup, .manage, .pad .sheet, .boardview, .pboard, .frow, .rules[open] {
+  position: relative; background: var(--surface); border-color: var(--metal-dark); border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--metal-dark), 0 12px 30px rgba(0, 0, 0, .7);
+}
+.sgroup::before, .manage::before, .boardview::before, .pboard::before, .pad .sheet::before,
+.sgroup::after, .manage::after, .boardview::after, .pboard::after, .pad .sheet::after { content: ''; position: absolute; height: 2px; pointer-events: none; }
+.sgroup::before, .manage::before, .boardview::before, .pboard::before, .pad .sheet::before { top: 0; left: 0; right: 50%; background: linear-gradient(90deg, var(--glow), transparent); }
+.sgroup::after, .manage::after, .boardview::after, .pboard::after, .pad .sheet::after { bottom: 0; left: 50%; right: 0; background: linear-gradient(90deg, transparent, var(--orange)); }
+.pad .sheet { border-top: 0; border-radius: 4px 4px 0 0; }
+.boardview, .pboard { background: var(--surface) linear-gradient(to right, rgba(0, 229, 255, .05) 1px, transparent 1px) 0 0 / 24px 24px, linear-gradient(to bottom, rgba(0, 229, 255, .05) 1px, transparent 1px) 0 0 / 24px 24px; }
+/* glowing rim round the live board */
+.boardview svg, .pboard svg { filter: drop-shadow(0 0 10px rgba(0, 229, 255, .45)) drop-shadow(0 0 3px rgba(255, 122, 0, .5)); }
+
+/* Player cards */
+.player { position: relative; }
+.player::before, .player::after { content: ''; position: absolute; height: 2px; pointer-events: none; opacity: .35; }
+.player::before { top: 0; left: 0; right: 50%; background: linear-gradient(90deg, var(--glow), transparent); }
+.player::after { bottom: 0; left: 50%; right: 0; background: linear-gradient(90deg, transparent, var(--orange)); }
+.player.active::before, .player.active::after { opacity: 1; height: 3px; }
+.player .name, .pp .nm { font-family: var(--font-hud); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.player .score, .pp .big, .total b { font-family: var(--font-hud); font-weight: 900; }
+.player .score, .pp .big { letter-spacing: 0; }
+@media (min-width: 701px) { .player .score { font-size: clamp(52px, 30cqi, 190px); } }
+.player.active { background: linear-gradient(180deg, rgba(0, 229, 255, .1), rgba(0, 229, 255, .02)); box-shadow: inset 0 0 0 1px var(--glow), inset 0 0 60px rgba(0, 229, 255, .16), 0 0 30px rgba(0, 229, 255, .2); }
+.player.active.bust, .pp.active.bust { background: linear-gradient(180deg, rgba(255, 90, 54, .14), rgba(255, 90, 54, .03)); box-shadow: inset 0 0 0 1px var(--red), inset 0 0 60px rgba(255, 90, 54, .22), 0 0 30px rgba(255, 90, 54, .3); }
+.player.active.bust .name, .player.active.bust .route { color: var(--red); text-shadow: 0 0 10px rgba(255, 90, 54, .7); }
+.player.active.bust .score { color: var(--red); text-shadow: 0 0 6px rgba(255, 90, 54, .9), 0 0 24px rgba(255, 90, 54, .6), 0 0 50px rgba(255, 90, 54, .35); }
+.pp.active.bust .nm, .pp.active.bust .big { color: var(--red); text-shadow: 0 0 24px rgba(255, 90, 54, .6); }
+.pp.active { box-shadow: inset 4px 0 0 var(--glow), inset 0 -2px 0 -1px var(--orange); }
+.player .stats, .player .recent, .player .legs, .marks, .pp .rec, .pp .sub { font-family: var(--font); font-weight: 500; }
+
+/* Telemetry tags: chamfered corners, monospaced numerals */
+.player .tag, .ulist .badge {
+  border: 0; border-radius: 0; padding: 3px 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em;
+  background: rgba(0, 229, 255, .14); color: var(--glow);
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+}
+.phits span { border-radius: 0; clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%); border-width: 2px; font-family: var(--font); }
+
+/* Chips and buttons: beveled, uppercase; cyan = selected/primary, orange = hover on secondary */
+.chip { border-radius: 0; clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%); border-color: var(--metal-light); background: var(--surface); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; transition: border-color .15s, box-shadow .15s, color .15s; }
+.chip:hover { border-color: var(--orange); color: var(--orange); }
+.chip[aria-pressed="true"] { background: rgba(0, 229, 255, .12); color: var(--glow); border-color: var(--glow); box-shadow: inset 0 0 12px rgba(0, 229, 255, .25); }
+.chip[aria-pressed="true"]:hover { color: var(--glow); border-color: var(--glow); }
+.start {
+  border-radius: 0; clip-path: polygon(16px 0, 100% 0, calc(100% - 16px) 100%, 0 100%);
+  background: var(--elevated); color: var(--glow); border: 2px solid var(--glow);
+  font-family: var(--font-hud); font-style: italic; font-weight: 900; text-transform: uppercase; letter-spacing: .08em;
+  box-shadow: inset 0 0 18px rgba(0, 229, 255, .25); transition: box-shadow .15s, background .15s;
+}
+.start:hover:not(:disabled) { background: rgba(0, 229, 255, .16); box-shadow: inset 0 0 28px rgba(0, 229, 255, .45), 0 0 18px rgba(0, 229, 255, .6); }
+.start:disabled { border-color: var(--metal-light); color: var(--wire); box-shadow: none; }
+.bar { background: linear-gradient(180deg, var(--surface), rgba(14, 19, 29, .6)); border-bottom: 1px solid var(--metal-dark); font-family: var(--font); letter-spacing: .03em; }
+.bar button, .pbar button, .ulist button, .pad button, .manage li button, .frow button.add {
+  border-radius: 2px; border: 1px solid var(--metal-light); color: var(--wire); background: transparent; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; transition: border-color .15s, color .15s, box-shadow .15s;
+}
+.bar button:hover, .pbar button:hover, .ulist button:hover, .pad button:hover, .manage li button:hover:not(:disabled), .frow button.add:hover, .link:hover {
+  border-color: var(--orange); color: var(--orange); box-shadow: 0 0 12px rgba(255, 122, 0, .4);
+}
+.bar button#btn-next, .pad .foot button.primary { border-color: var(--glow); color: var(--glow); }
+.link { color: var(--wire); text-transform: uppercase; letter-spacing: .06em; font-size: 14px; }
+.ulist button.del, .manage li button.del { color: var(--red); border-color: rgba(255, 90, 54, .5); }
+.dot { background: transparent; border: 2px solid var(--wire); width: 14px; height: 14px; position: relative; }
+.dot::after { content: ''; position: absolute; inset: 2px; border-radius: 50%; background: currentColor; opacity: 0; }
+.dot.ok { border-color: var(--glow); background: transparent; box-shadow: 0 0 10px var(--glow), inset 0 0 6px var(--glow); }
+.dot.wait { border-color: var(--orange); background: transparent; box-shadow: 0 0 10px var(--orange); }
+.dot.off { border-color: var(--red); background: transparent; box-shadow: 0 0 10px var(--red); }
+.sform input, .sform select, .ulist input, .add input, .manage li input { border-radius: 2px; border-color: var(--metal-light); background: var(--cabinet-deep); font-family: var(--font); }
+.sform input:focus, .sform select:focus, .ulist input:focus, .add input:focus, .manage li input:focus { border-color: var(--glow); box-shadow: 0 0 12px rgba(0, 229, 255, .35); outline: none; }
+
+/* Visit darts: cyan reticle slots, orange when corrected by hand */
+.visit { background: linear-gradient(0deg, var(--surface), rgba(14, 19, 29, .7)); border-top: 1px solid var(--metal-dark); }
+.dart { border-radius: 2px; border: 2px dashed var(--metal-light); font-family: var(--font-hud); font-weight: 700; }
+.dart.hit { border-color: var(--glow); color: var(--glow); }
+.dart.edited { border-color: var(--orange); color: var(--orange); box-shadow: 0 0 14px rgba(255, 122, 0, .45), inset 0 0 14px rgba(255, 122, 0, .15); text-shadow: 0 0 10px rgba(255, 122, 0, .7); }
+.total b { text-shadow: var(--halo); }
+.total span { font-family: var(--font); text-transform: uppercase; letter-spacing: .1em; }
+.marks .m.closed, .frow.fixed { }
+.frow.fixed { box-shadow: inset 0 0 0 2px var(--orange); }
+.frow button { border-radius: 2px; border-color: var(--glow); }
+.pad .mult button[aria-pressed="true"] { border-color: var(--glow); color: var(--glow); }
+.rules summary { border-radius: 0; clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%); border-color: var(--metal-light); text-transform: uppercase; letter-spacing: .06em; }
+.rules summary:hover { border-color: var(--orange); }
+.banner { background: radial-gradient(60% 60% at 50% 45%, rgba(0, 229, 255, .12), rgba(7, 9, 14, .94)); }
+@media (prefers-reduced-motion: reduce) { .chip, .start, .bar button { transition: none; } }
 </style>
 <script>
 // Scale the whole page with the screen: the layout is designed for 1200x900 and zoomed to fill larger or
@@ -1592,7 +1714,7 @@ function render() {
   publish();
 }
 
-const PCOL = ['#2ef2ff', '#ff3dbb', '#a4ff3a', '#ffc23d', '#b58cff', '#ffffff', '#ff6a3d', '#3d8bff'];
+const PCOL = ['#00e5ff', '#ff7a00', '#a4ff3a', '#ffd23d', '#b58cff', '#ffffff', '#ff4d6d', '#3d8bff'];
 let boardBase = '';
 function boardSvg() {
   if (boardBase) return boardBase;
@@ -2370,6 +2492,8 @@ cat > "$DIR/cgi-bin/players" <<'EOF_CGI'
 #!/bin/sh
 # Shared player list for Darts Scoreboard. GET returns it, POST replaces it.
 F=/data/scoreboard/data/players.json
+. /data/scoreboard-auth/lock.sh
+csrf_check
 printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
 if [ "$REQUEST_METHOD" = POST ]; then
   len=${CONTENT_LENGTH:-0}
@@ -2391,6 +2515,7 @@ cat > "$DIR/cgi-bin/lights" <<'EOF_LIGHTS'
 # (the player holding the board, or anyone while no game is locked); any other POST is a game-start
 # ping, which the lights service treats as activity.
 . /data/scoreboard-auth/lock.sh
+csrf_check
 M=/data/lights/mode
 printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
 if [ "$REQUEST_METHOD" = POST ]; then
@@ -2415,9 +2540,10 @@ cat > "$DIR/cgi-bin/game" <<'EOF_GAME'
 # Live view of the running game for the passive display. The scoring device POSTs it, displays GET it.
 # Kept in RAM (/tmp): it is only needed while a game is on. Only the user holding the game lock may post.
 F=/tmp/scoreboard-game.json
+. /data/scoreboard-auth/lock.sh
+csrf_check
 printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
 if [ "$REQUEST_METHOD" = POST ]; then
-  . /data/scoreboard-auth/lock.sh
   lock_mutex
   may_write || { echo '{"ok":false,"locked":true}'; exit 0; }
   touch "$SEEN"
@@ -2438,9 +2564,10 @@ cat > "$DIR/cgi-bin/board" <<'EOF_BOARD'
 #!/bin/sh
 # Board access for pages opened over HTTPS (the internet link): state (GET); POST "start" starts
 # the board, any other POST resets it. Start and reset are allowed only for the game lock holder.
+. /data/scoreboard-auth/lock.sh
+csrf_check
 printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
 if [ "$REQUEST_METHOD" = POST ]; then
-  . /data/scoreboard-auth/lock.sh
   len=${CONTENT_LENGTH:-0}
   case "$len" in ''|*[!0-9]*) len=0 ;; esac
   [ "$len" -le 16 ] || len=16
@@ -2465,10 +2592,14 @@ cat > "$DIR/cgi-bin/settings" <<'EOF_SET'
 . /data/scoreboard-auth/lock.sh
 AUTH=/data/scoreboard-auth; CONF=$AUTH/httpd.conf; ADM=$AUTH/admins
 SET=/data/scoreboard/data/settings
+csrf_check
 LPY=/data/lights/venv/bin/python; LCONF=/data/lights/config.json; LMODE=/data/lights/mode
 printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
 fail() { printf '{"ok":false,"error":"%s"}\n' "$1"; exit 0; }
 users() { sed -n 's#^/cgi-bin:\([^:]*\):.*#\1#p' "$CONF"; }
+isuser() { users | grep -qxF "$1"; }
+isadmin() { grep -qxF "$1" "$ADM" 2>/dev/null; }
+dropline() { awk -F: -v n="$1" '!($1 == "/cgi-bin" && $2 == n)' "$CONF"; }
 nusers=$(users | grep -c .)
 if [ "$nusers" -gt 0 ]; then
   is_admin || fail "Only admins can change settings."
@@ -2487,34 +2618,36 @@ if [ "$REQUEST_METHOD" = POST ]; then
   get() { v=$(printf '%s' "$body" | tr '&' '\n' | sed -n "s/^$1=//p" | head -1); [ -n "$v" ] && httpd -d "$v"; }
   lock_mutex
   name=$(get name)
+  # Names are matched as plain text below, never as patterns.
+  [ -z "$name" ] || echo "$name" | grep -qE '^[A-Za-z0-9_.-]{1,24}$' || fail "Name: 1-24 letters, digits, _ . or -"
   case "$(get action)" in
     user_add|user_pw)
       act=$(get action); pw=$(get password)
       echo "$name" | grep -qE '^[A-Za-z0-9_.-]{1,24}$' || fail "Name: 1-24 letters, digits, _ . or -"
       [ ${#pw} -ge 6 ] || fail "Password: at least 6 characters."
       case "$pw" in *:*) fail "A password can't contain a colon." ;; esac
-      if users | grep -qx "$name"; then [ "$act" = user_add ] && fail "$name already exists."
+      if isuser "$name"; then [ "$act" = user_add ] && fail "$name already exists."
       else [ "$act" = user_pw ] && fail "No user $name."; fi
       h=$(httpd -m "$pw")
-      { grep -v "^/cgi-bin:$name:" "$CONF"; echo "/cgi-bin:$name:$h"; } | set_file "$CONF"
+      { dropline "$name"; echo "/cgi-bin:$name:$h"; } | set_file "$CONF"
       if [ "$act" = user_add ] && { [ "$nusers" -eq 0 ] || [ "$(get admin)" = 1 ]; }; then
-        grep -qx "$name" "$ADM" || echo "$name" >> "$ADM"
+        isadmin "$name" || echo "$name" >> "$ADM"
       fi
       reload ;;
     user_del)
-      users | grep -qx "$name" || fail "No user $name."
+      isuser "$name" || fail "No user $name."
       [ "$name" = "$ME" ] && fail "You can't remove yourself."
-      grep -qx "$name" "$ADM" && [ "$(grep -c . "$ADM")" -le 1 ] && fail "Keep at least one admin."
-      grep -v "^/cgi-bin:$name:" "$CONF" | set_file "$CONF"
-      grep -vx "$name" "$ADM" | set_file "$ADM"
+      isadmin "$name" && [ "$(grep -c . "$ADM")" -le 1 ] && fail "Keep at least one admin."
+      dropline "$name" | set_file "$CONF"
+      grep -vxF "$name" "$ADM" | set_file "$ADM"
       reload ;;
     user_admin)
-      users | grep -qx "$name" || fail "No user $name."
-      if [ "$(get on)" = 1 ]; then grep -qx "$name" "$ADM" || echo "$name" >> "$ADM"
+      isuser "$name" || fail "No user $name."
+      if [ "$(get on)" = 1 ]; then isadmin "$name" || echo "$name" >> "$ADM"
       else
         [ "$name" = "$ME" ] && fail "You can't remove your own admin rights."
-        grep -qx "$name" "$ADM" && [ "$(grep -c . "$ADM")" -le 1 ] && fail "Keep at least one admin."
-        grep -vx "$name" "$ADM" | set_file "$ADM"
+        isadmin "$name" && [ "$(grep -c . "$ADM")" -le 1 ] && fail "Keep at least one admin."
+        grep -vxF "$name" "$ADM" | set_file "$ADM"
       fi ;;
     lights_mode)
       [ -w "$LMODE" ] || fail "Lights are not installed."
@@ -2567,7 +2700,7 @@ fi
 printf '{"ok":true,"me":"%s","users":[' "$ME"
 sep=
 for u in $(users); do
-  a=false; grep -qx "$u" "$ADM" && a=true
+  a=false; isadmin "$u" && a=true
   printf '%s{"name":"%s","admin":%s}' "$sep" "$u" "$a"; sep=,
 done
 lights='{"installed":false}'
@@ -2596,6 +2729,7 @@ cat > "$DIR/cgi-bin/lock" <<'EOF_LOCK'
 #!/bin/sh
 # Game lock. GET: who I am and who holds the board. POST body: acquire | release | force (admins).
 . /data/scoreboard-auth/lock.sh
+csrf_check
 printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
 ok=true
 if [ "$REQUEST_METHOD" = POST ]; then
@@ -2648,6 +2782,18 @@ lock_owner() {   # prints the user holding a live lock, or nothing
   if [ -f "$SEEN" ]; then s=$(date -r "$SEEN" +%s 2>/dev/null); [ -n "$s" ] && [ "$s" -gt "$last" ] && last=$s; fi
   if [ $(( $(date +%s) - last )) -gt $(( LOCK_HOURS * 3600 )) ]; then rm -f "$LOCK"; return 0; fi
   printf '%s' "$u"
+}
+# Browsers resend cached Basic-auth credentials on cross-site requests, so a POST from another site
+# could act as the signed-in user. Refuse any POST the browser says is not from this page.
+csrf_check() {
+  [ "$REQUEST_METHOD" = POST ] || return 0
+  if [ -n "$HTTP_SEC_FETCH_SITE" ]; then
+    case "$HTTP_SEC_FETCH_SITE" in same-origin|none) return 0 ;; esac
+  elif [ -z "$HTTP_ORIGIN" ]; then return 0   # not a browser (curl, scripts)
+  else case "$HTTP_ORIGIN" in *://"$HTTP_HOST") return 0 ;; esac
+  fi
+  printf 'Status: 403 Forbidden\r\nContent-Type: application/json\r\nCache-Control: no-store\r\n\r\n{"ok":false,"error":"Cross-site request refused."}\n'
+  exit 0
 }
 may_write() { o=$(lock_owner); [ -z "$o" ] || [ "$o" = "$ME" ]; }
 is_admin() { [ -n "$ME" ] && grep -qx "$ME" /data/scoreboard-auth/admins 2>/dev/null; }

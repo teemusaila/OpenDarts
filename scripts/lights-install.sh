@@ -141,7 +141,11 @@ def main():
             log("mode %s" % m)
             if m == "on" and switch(True): on = True; last_throw = now
             if m == "off" and switch(False): on = False
-            if m == "auto" and on: last_activity = last_throw = now
+            if m == "auto":
+                # Taking over again: what the board did while the mode was forced is not activity.
+                last_state, last_ping = board(), ping_time()
+                last_nt = last_state[3] if last_state else None
+                if on: last_activity = last_throw = now
         if m != "auto":
             continue
         state = board()
