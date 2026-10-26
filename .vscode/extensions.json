@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "anthropic.claude-code",
+    "timonwong.shellcheck",
+    "ms-vscode-remote.remote-ssh",
+    "ms-python.python"
+  ]
+}

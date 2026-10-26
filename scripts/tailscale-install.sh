@@ -19,6 +19,7 @@ grep -q ' /data ' /proc/mounts || { echo "/data is not mounted."; exit 1; }
 
 echo "== Installing Tailscale"
 apk add -q tailscale tailscale-openrc
+apk cache -q sync 2>/dev/null || true   # packages come back from this cache at boot
 modprobe tun
 grep -qx tun /etc/modules || echo tun >> /etc/modules
 mkdir -p /data/tailscale && chmod 700 /data/tailscale

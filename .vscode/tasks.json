@@ -1,0 +1,7 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "Check syntax", "type": "shell", "command": "tools/check.sh", "problemMatcher": [] },
+    { "label": "Install on the Pi (deploy.sh)", "type": "shell", "command": "tools/check.sh && ./deploy.sh", "problemMatcher": [] }
+  ]
+}

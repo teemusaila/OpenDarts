@@ -44,6 +44,8 @@ BOOT=/media/${LBU_MEDIA:-mmcblk0p1}
 echo "== Packages"
 apk add -q gcompat libgcc libstdc++ v4l-utils ca-certificates bash curl
 on "$OPT_CLOCK_SYNC" && apk add -q chrony
+# A diskless Pi reinstalls packages from the SD-card cache at boot: make sure it has all of them.
+apk cache -q sync 2>/dev/null || true
 grep -qx uvcvideo /etc/modules || echo uvcvideo >> /etc/modules
 modprobe uvcvideo 2>/dev/null || true
 
@@ -90,11 +92,12 @@ supervisor="supervise-daemon"
 supervise_daemon_args="--env LD_PRELOAD=$HOME_DIR/adshim.so --env HOME=$HOME_DIR"
 respawn_delay=5
 respawn_max=0
-output_log="/var/log/autodarts.log"
-error_log="/var/log/autodarts.log"
+output_log="/data/logs/autodarts.log"
+error_log="/data/logs/autodarts.log"
 
 start_pre() {
-    checkpath -f -o autodarts:autodarts -m 0644 /var/log/autodarts.log
+    checkpath -d -m 0755 /data/logs
+    checkpath -f -o autodarts:autodarts -m 0644 /data/logs/autodarts.log
 }
 
 depend() {
@@ -153,6 +156,9 @@ chmod 755 "$TUNE"
 rc-update add local default >/dev/null
 lbu include "$TUNE"
 sh "$TUNE" || true
+# The same exposure is reapplied when a camera reconnects (cam-setup, installed by keepalive-install.sh).
+printf '# Camera exposure applied whenever a camera appears (cam-setup). Empty = auto exposure.\nCAM_EXPOSURE=%s\n' "$OPT_CAMERA_EXPOSURE" > /etc/conf.d/autodarts-camera
+lbu include /etc/conf.d/autodarts-camera
 
 if on "$OPT_FAST_BOOT"; then
   sed -i 's/^#\{0,1\}rc_parallel=.*/rc_parallel="YES"/' /etc/rc.conf
@@ -220,5 +226,5 @@ sleep 5
 if wget -qO /dev/null http://127.0.0.1:3180/api/state 2>/dev/null; then
   echo "Autodarts is running. Log in to the Pi and run  ad  to pair the board with your account and set up the cameras."
 else
-  echo "Autodarts started but does not answer yet. Check: tail /var/log/autodarts.log"
+  echo "Autodarts started but does not answer yet. Check: tail /data/logs/autodarts.log"
 fi

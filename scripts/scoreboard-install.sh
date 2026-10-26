@@ -28,6 +28,7 @@ grep -q ' /data ' /proc/mounts || { echo "/data is not mounted."; exit 1; }
 
 echo "== Installing the web server"
 apk add -q busybox-extras
+apk cache -q sync 2>/dev/null || true   # packages come back from this cache at boot
 HTTPD=$(command -v httpd) || { echo "httpd not found after installing busybox-extras."; exit 1; }
 
 echo "== Writing the scoreboard to $DIR"
@@ -451,6 +452,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--glow); outl
       <button class="chip" id="opt-voice-test">Test voice</button>
       <button class="chip" id="opt-tips" aria-pressed="true">Throw tips on</button>
       <button class="chip" id="opt-awake" aria-pressed="true">Keep screen on</button>
+      <button class="chip" id="opt-lights" hidden>Lights: auto</button>
       <button class="chip" id="btn-settings" hidden>Settings: users, lights, game lock</button>
     </div>
 
@@ -516,6 +518,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--glow); outl
     <span id="conn-text">Connecting to board</span>
     <span class="grow" id="match-text"></span>
     <button id="btn-reset" class="reset">Reset board</button>
+    <button id="btn-lights" hidden>Lights: auto</button>
     <button id="btn-passive">Passive view</button>
     <button id="btn-fix">Fix scores</button>
     <button id="btn-undo">Undo visit</button>
@@ -1984,6 +1987,29 @@ $('conn-text').ondblclick = () => $('raw').classList.toggle('on');
 function save() { if (G) store.set('game', G); }
 // Tells the Pi a game has started, so the lights come on even before the first dart.
 function pingLights() { try { fetch('cgi-bin/lights', { method: 'POST', keepalive: true }).catch(() => {}); } catch {} }
+// Lights (LEDs): Automatic -> On -> Off. Shown when the lights service is installed.
+const LIGHT_LABEL = { auto: 'Lights: auto', on: 'Lights: on', off: 'Lights: off' };
+let lightsMode = null;
+function showLights() {
+  for (const id of ['btn-lights', 'opt-lights']) {
+    const b = $(id);
+    b.hidden = !lightsMode;
+    if (lightsMode) { b.textContent = LIGHT_LABEL[lightsMode] || 'Lights'; b.setAttribute('aria-pressed', String(lightsMode !== 'off')); }
+  }
+}
+async function lightsCall(mode) {
+  try {
+    const res = await fetch('cgi-bin/lights', mode ? { method: 'POST', body: mode } : { cache: 'no-store' });
+    if (!res.ok) return;
+    const d = await res.json();
+    if (d.ok === false && d.error) alert(d.error);
+    if (d.installed !== undefined) lightsMode = d.installed ? (d.mode || 'auto') : null;
+    showLights();
+  } catch {}
+}
+function nextLights() { lightsCall({ auto: 'on', on: 'off', off: 'auto' }[lightsMode] || 'auto'); }
+$('btn-lights').onclick = nextLights;
+$('opt-lights').onclick = nextLights;
 function toGame() { $('setup').classList.remove('on'); $('game').classList.add('on'); render(); screenOn(true); }
 function toSetup(viewerOnly) {
   if (updateReady) setTimeout(() => location.reload(), 300);   // a newer version was installed meanwhile
@@ -2006,6 +2032,8 @@ else {
   if (location.hash === '#passive') showPassive('remote');
   lockWatch();
   setInterval(lockWatch, 3000);
+  lightsCall();
+  setInterval(() => lightsCall(), 30000);
   poll();
   setInterval(poll, 300);
 }
@@ -2079,9 +2107,28 @@ if [ -f "$F" ]; then cat "$F"; else echo '{"players":[],"last":[]}'; fi
 EOF_CGI
 cat > "$DIR/cgi-bin/lights" <<'EOF_LIGHTS'
 #!/bin/sh
-# The scoreboard calls this when a game starts. The lights service (if installed) treats it as activity.
+# Lights (LEDs) on the Wi-Fi plug. GET: {"installed","mode"}. POST "auto" | "on" | "off" sets the mode
+# (the player holding the board, or anyone while no game is locked); any other POST is a game-start
+# ping, which the lights service treats as activity.
+. /data/scoreboard-auth/lock.sh
+M=/data/lights/mode
 printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
-touch /data/lights/ping 2>/dev/null && echo '{"ok":true}' || echo '{"ok":false}'
+if [ "$REQUEST_METHOD" = POST ]; then
+  len=${CONTENT_LENGTH:-0}
+  case "$len" in ''|*[!0-9]*) len=0 ;; esac
+  [ "$len" -le 8 ] || len=8
+  act=$(head -c "$len")
+  case "$act" in
+    auto|on|off)
+      [ -w "$M" ] || { echo '{"ok":false,"error":"Lights are not installed."}'; exit 0; }
+      lock_mutex
+      may_write || { echo '{"ok":false,"error":"Someone else is playing."}'; exit 0; }
+      echo "$act" > "$M" ;;
+    *) touch /data/lights/ping 2>/dev/null ;;
+  esac
+fi
+if [ -w "$M" ]; then printf '{"ok":true,"installed":true,"mode":"%s"}\n' "$(cat "$M" 2>/dev/null || echo auto)"
+else echo '{"ok":true,"installed":false}'; fi
 EOF_LIGHTS
 cat > "$DIR/cgi-bin/game" <<'EOF_GAME'
 #!/bin/sh

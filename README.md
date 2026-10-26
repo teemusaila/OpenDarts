@@ -147,6 +147,8 @@ Users can also be managed on the Pi with `scoreboard-user` (`add`, `passwd`, `de
 
 - **Sign-in:** once a user exists, the browser asks for a name and password. *Sign out* is next
   to your name in the menu.
+- **Lights:** with the lights installed, a *Lights* button on the game screen and in the menu cycles
+  automatic → on → off (the player holding the board, or anyone while no game is locked).
 - **Keep screen on / Throw tips:** per-device switches in the menu. Keeping the screen on works
   best over HTTPS (for example the Tailscale `/play/` link); on plain HTTP a silent video is used,
   which works on most phones.
@@ -195,13 +197,24 @@ A copy of the passive display that shows the running game but has no controls, n
 nothing that can change data. It listens only inside the Pi (`127.0.0.1:8081`); share it with
 Tailscale Funnel (below) or another tunnel.
 
-### Keep-alive (`INSTALL_KEEPALIVE`)
+### Health check (`INSTALL_KEEPALIVE`)
 
-`darts-keepalive` runs at boot and every 15 minutes. It starts or restarts the scoreboard, the public
-view, the lights and Autodarts if they have stopped or don't answer, and restores the Tailscale
-Funnel routes listed in `/data/scoreboard/data/funnel-routes` (for example `/ 8081` and
-`/play 8080`). To stop sharing for good, empty that file before turning Funnel off; otherwise the
-routes come back. Log: `/var/log/darts-keepalive.log`.
+`darts-keepalive` runs a minute after boot and then every 5 minutes. It:
+
+- starts or restarts the scoreboard, the public view and the lights service if they have stopped
+  or don't answer, and starts Autodarts if its service has stopped;
+- checks that every camera in the Autodarts config is on its USB port with its usual `/dev/video`
+  number. When a camera drops off USB and comes back (a power dip, a loose cable), it gets a new
+  number and Autodarts no longer matches it to its calibration. The check then re-attaches the
+  cameras in order and restarts Autodarts, which restores all calibrations;
+- restores the Tailscale Funnel routes listed in `/data/scoreboard/data/funnel-routes` (for
+  example `/ 8081` and `/play 8080`). To stop sharing for good, empty that file before turning
+  Funnel off; otherwise the routes come back;
+- once a day, checks that every installed package can be reinstalled from the SD-card cache at
+  boot (a diskless Pi reinstalls them at every start) and refreshes the cache if not.
+
+A camera that reconnects also gets its fixed exposure back (`cam-setup`, run by `mdev`), set by
+`OPT_CAMERA_EXPOSURE` (stored in `/etc/conf.d/autodarts-camera`).
 
 If a secure address is set, the home address checks it first and only sends devices there when it
 answers; otherwise the scoreboard opens on the home address.
@@ -211,7 +224,9 @@ answers; otherwise the scoreboard opens on the home address.
 - **Backup:** `pi-backup` runs weekly and keeps five archives in `/data/backups`. They contain
   passwords and keys, so copy them somewhere safe and private:
   `scp "root@<pi-address>:/data/backups/pi-backup-*.tar.gz" .`
-- **Log trim:** `/var/log/autodarts.log` is cut back daily once it passes 5 MB.
+- **Logs on the SD card:** `/data/logs` holds the system and kernel log (`messages`), `autodarts.log`,
+  `lights.log`, `darts-keepalive.log` and `cameras.log`, so they survive a reboot. They are trimmed
+  daily once they pass 5 MB.
 - **Watchdog:** the Pi restarts itself if it hangs for 30 seconds.
 
 ### Lights
@@ -270,6 +285,26 @@ The login is kept in `/data/tailscale`, so it survives reboots. Turn sharing off
 On the internet, `/` shows the read-only view to anyone who has the link. `/play/` always asks
 for a scoreboard sign-in, so create users with strong passwords before enabling it.
 
+## Troubleshooting
+
+**Cameras disappear, or calibration is lost after a while.** Almost always power. A Raspberry Pi 5
+gives its USB ports only about 600 mA in total unless its supply negotiates 5 A, and three Autodarts
+cameras ask for about 1.5 A. Use the official Raspberry Pi 27 W USB-C supply (5 V / 5 A), or power
+the cameras through a powered USB hub. Check on the Pi:
+`hexdump -e '1/4 "%u\n"' /proc/device-tree/chosen/power/max_current` (5000 is good; around 900
+or 3000 means the USB ports are limited). Don't overclock while power is marginal
+(`OPT_OVERCLOCK` empty). `/data/logs/cameras.log` and `darts-keepalive.log` show every reconnect.
+
+**Cameras with the same serial number.** Some camera batches report identical serials, so
+Autodarts tells them apart only by USB port. Keep every camera in the same port; moving them swaps
+their calibrations.
+
+**Something stops working after a reboot.** A diskless Pi reinstalls its packages from the SD-card
+cache at every start; a package missing from the cache silently doesn't come back. Fix it with
+`apk cache sync && lbu commit -d`. The health check does this daily.
+
+**Where are the logs?** In `/data/logs` (see Maintenance).
+
 ## Security notes
 
 - The scoreboard uses HTTP Basic sign-in for its data (`/cgi-bin/`); the page itself holds no
@@ -293,6 +328,7 @@ for a scoreboard sign-in, so create users with strong passwords before enabling 
 | `/data/scoreboard-public` | Read-only copy. |
 | `/data/lights` | Lights service and its settings. |
 | `/data/backups` | Backups. |
+| `/data/logs` | Logs (kept across reboots). |
 | `/data/tailscale` | Tailscale login state. |
 
 ## About this code

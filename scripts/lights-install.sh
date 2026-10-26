@@ -21,6 +21,8 @@ grep -q ' /data ' /proc/mounts || { echo "/data is not mounted."; exit 1; }
 
 echo "== Installing python3 and tinytuya"
 apk add -q python3
+# A diskless Pi reinstalls packages from the SD-card cache at boot: make sure it has all of them.
+apk cache -q sync 2>/dev/null || true
 [ -x "$DIR/venv/bin/python" ] || python3 -m venv "$DIR/venv"
 "$DIR/venv/bin/pip" install -q tinytuya
 
@@ -195,8 +197,8 @@ command="/data/lights/venv/bin/python"
 command_args="/data/lights/lights.py"
 command_user="nobody"
 supervisor="supervise-daemon"
-output_log="/var/log/lights.log"
-error_log="/var/log/lights.log"
+output_log="/data/logs/lights.log"
+error_log="/data/logs/lights.log"
 respawn_delay=5
 respawn_max=0
 
@@ -206,7 +208,8 @@ depend() {
 }
 
 start_pre() {
-    checkpath -f -o nobody -m 0644 /var/log/lights.log
+    checkpath -d -m 0755 /data/logs
+    checkpath -f -o nobody -m 0644 /data/logs/lights.log
 }
 EOF
 chmod 755 /etc/init.d/lights
@@ -217,6 +220,6 @@ echo "== Saving and starting"
 lbu commit -d
 rc-service lights restart >/dev/null 2>&1 || rc-service lights start
 sleep 4
-tail -5 /var/log/lights.log
+tail -5 /data/logs/lights.log
 echo
 echo "Done. Force with: echo on > $DIR/mode   (or off, auto)"

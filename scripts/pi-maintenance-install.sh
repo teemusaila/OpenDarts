@@ -1,6 +1,7 @@
 #!/bin/sh
 # This code was generated with AI (Claude by Anthropic). MIT License, see LICENSE and README.
-# pi-maintenance-install.sh: weekly backup, daily log trim and hardware watchdog for the Autodarts Pi.
+# pi-maintenance-install.sh: weekly backup, logs kept on the SD card (trimmed daily) and a hardware
+# watchdog for the Autodarts Pi.
 #
 # Run as root on the Pi:   sh pi-maintenance-install.sh
 # Everything is saved with lbu, so it survives reboots. Re-running is safe.
@@ -30,12 +31,28 @@ EOF
 
 cat > /etc/periodic/daily/trim-logs <<'EOF'
 #!/bin/sh
-# Keep the in-RAM Autodarts log from growing without limit (the daemon writes in append mode).
-L=/var/log/autodarts.log
-if [ -f "$L" ] && [ "$(wc -c < "$L")" -gt 5242880 ]; then
-  tail -c 1048576 "$L" > "$L.1" && : > "$L"
-fi
+# Keep the logs from growing without limit: over 5 MB, the last 1 MB moves to NAME.1 and the log
+# starts empty (the services write in append mode, so this is safe while they run).
+for L in /data/logs/*.log /var/log/autodarts.log /var/log/lights.log; do
+  if [ -f "$L" ] && [ "$(wc -c < "$L")" -gt 5242880 ]; then
+    tail -c 1048576 "$L" > "$L.1" && : > "$L"
+  fi
+done
 EOF
+
+# Logs on the SD card, so they survive a reboot (/var/log is in RAM on a diskless Pi): the system and
+# kernel log (rotated by syslogd at 1 MB, 3 old copies), Autodarts and the lights service.
+mkdir -p /data/logs
+sed -i 's|^SYSLOGD_OPTS=.*|SYSLOGD_OPTS="-t -O /data/logs/messages -s 1024 -b 3"|' /etc/conf.d/syslog
+grep -q '^SYSLOGD_OPTS=' /etc/conf.d/syslog || echo 'SYSLOGD_OPTS="-t -O /data/logs/messages -s 1024 -b 3"' >> /etc/conf.d/syslog
+rc-update add klogd boot >/dev/null 2>&1 || true
+for svc in autodarts lights; do
+  f=/etc/init.d/$svc
+  [ -f "$f" ] || continue
+  sed -i "s|/var/log/$svc.log|/data/logs/$svc.log|g" "$f"
+  lbu include "$f"
+done
+lbu include /etc/conf.d/syslog
 
 # Hardware watchdog: reboots the Pi if it hangs for 30 s. Closed cleanly on shutdown.
 cat > /etc/local.d/watchdog.start <<'EOF'
