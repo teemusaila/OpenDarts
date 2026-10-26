@@ -12,8 +12,9 @@ automatically from the board service; the page runs the games itself.
   optional optimizations (clock sync, CPU and Wi-Fi tuning, camera exposure, overclock).
 
 - **Games:** X01 (301/501/701, double in/out), Cricket (standard, cut-throat, no points),
-  Around the Clock, Shanghai, Count-Up, Halve-It, Bob's 27 and Killer, with legs and short
-  rules for each game in the menu.
+  Tactics, Mickey Mouse, Around the Clock, Shanghai, Baseball, Golf, Count-Up, Fives, Halve-It,
+  Bob's 27, a checkout drill (121 style), Killer, Follow the Leader and Scram, with legs, sets
+  and short rules for each game in the menu.
 - **Scoring:** checkout routes, a live dartboard of the round's hits, the last scores of each
   player, a spoken score caller, tap-to-correct, *Fix scores* for earlier visits, undo.
 - **Help at the board:** throw tips for every game (X01 set-ups and checkouts, Cricket, Killer and

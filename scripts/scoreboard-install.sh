@@ -7,8 +7,9 @@
 # Installs a single web page to /data/scoreboard and serves it on port 8080 with
 # Busybox httpd. Open http://<pi-address>:8080 on any tablet, phone, laptop or TV browser.
 # The page reads detected darts from the board service (port 3180) and runs the games
-# itself: X01, Cricket (standard, cut-throat, no points), Around the Clock, Shanghai,
-# Count-Up, Halve-It, Bob's 27 and Killer, with legs, checkout routes, a live dartboard of
+# itself: X01, Cricket (standard, cut-throat, no points), Tactics, Mickey Mouse, Around the
+# Clock, Shanghai, Baseball, Golf, Count-Up, Fives, Halve-It, Bob's 27, a checkout drill, Killer,
+# Follow the Leader and Scram, with legs and sets, checkout routes, a live dartboard of
 # the round's hits, corrections, a Fix scores list for earlier visits, undo and a spoken
 # score caller.
 # Sign-in: add users with "scoreboard-user add NAME" (until the first user exists the page is open).
@@ -290,6 +291,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--glow); outl
 .marks .mk { display: contents; }
 .marks .t { text-align: right; color: inherit; opacity: .75; }
 .marks .m { text-align: left; font-weight: 700; min-width: 1.6em; letter-spacing: .05em; }
+.marks.many { grid-template-columns: repeat(4, auto); }
 .marks .m.closed { color: var(--green); text-shadow: 0 0 8px rgba(164, 255, 58, .8); }
 .player.out { opacity: .4; }
 .player .tag { font-size: clamp(14px, calc(1.6vw / var(--z)), 18px); padding: 2px 10px; border-radius: 999px; border: 1px solid currentColor; }
@@ -432,6 +434,11 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--glow); outl
   <div>
     <h2>First to</h2>
     <div class="row" id="opt-legs"></div>
+  </div>
+
+  <div>
+    <h2>Sets</h2>
+    <div class="row" id="opt-sets"></div>
   </div>
 
   <div class="row" style="align-items:center; gap:24px">
@@ -697,18 +704,18 @@ function straightOutTip(r) {
 }
 // Cricket: score when it helps, close what opponents score on, else close the highest open number.
 function cricketTip(s, i) {
-  const me = s.p[i], others = s.p.filter((p, j) => j !== i), mode = s.o.mode;
+  const me = s.p[i], others = s.p.filter((p, j) => j !== i), mode = s.o.mode, nums = s.nums || CRICKET;
   const open = (p, t) => p.marks[t] < 3;
   const aim = (t, why) => `Aim ${t === 25 ? 'Bull' : 'T' + t} · ${why}`;
   if (mode !== 'none' && others.length) {
     const pts = others.map((p) => p.pts);
     const needPoints = mode === 'standard' ? me.pts <= Math.max(...pts) : me.pts >= Math.min(...pts);
-    const scoreOn = CRICKET.find((t) => !open(me, t) && others.some((p) => open(p, t)));
+    const scoreOn = nums.find((t) => !open(me, t) && others.some((p) => open(p, t)));
     if (needPoints && scoreOn) return aim(scoreOn, mode === 'standard' ? 'score' : 'points to opponents');
-    const defend = CRICKET.find((t) => open(me, t) && others.some((p) => !open(p, t)));
+    const defend = nums.find((t) => open(me, t) && others.some((p) => !open(p, t)));
     if (defend) return aim(defend, 'close it');
   }
-  const next = CRICKET.find((t) => open(me, t));
+  const next = nums.find((t) => open(me, t));
   return next ? aim(next, 'close it') : '';
 }
 // Killer: become a killer, then go after the weakest opponent.
@@ -788,55 +795,74 @@ GAMES.x01 = {
 // ---------- Cricket ----------
 const CRICKET = [20, 19, 18, 17, 16, 15, 25];
 const markGlyph = (m) => ['', '/', 'X', 'Ⓧ'][Math.min(m, 3)];
-GAMES.cricket = {
-  name: 'Cricket',
+// Cricket and its relatives differ only in which numbers are in play.
+function cricketGame({ name, nums, rule, titles }) {
+  return {
+    name, rule,
+    options: [
+      { key: 'mode', label: 'Scoring', choices: [['Standard', 'standard'], ['Cut-throat', 'cut'], ['No points', 'none']], def: 'standard' },
+    ],
+    title: (o) => ({ standard: titles[0], cut: titles[1], none: titles[2] }[o.mode]),
+    create(o, n, prev) {
+      return { o, nums, p: Array.from({ length: n }, (_, i) => ({
+        marks: Object.fromEntries(nums.map((t) => [t, 0])), pts: 0,
+        totalMarks: prev ? prev.p[i].totalMarks : 0, rounds: prev ? prev.p[i].rounds : 0,
+      })) };
+    },
+    play(s, i, darts) {
+      const me = s.p[i], mode = s.o.mode, list = s.nums || CRICKET;
+      let marks = 0;
+      const closedAll = (p) => list.every((t) => p.marks[t] >= 3);
+      for (const d of darts) {
+        if (!list.includes(d.n) || !d.m) continue;
+        for (let k = 0; k < d.m; k++) {
+          marks++;
+          if (me.marks[d.n] < 3) { me.marks[d.n]++; continue; }
+          const val = d.n;
+          const open = s.p.filter((p, j) => j !== i && p.marks[d.n] < 3);
+          if (!open.length || mode === 'none') continue;
+          if (mode === 'standard') me.pts += val;
+          else open.forEach((p) => { p.pts += val; });
+        }
+        if (closedAll(me)) {
+          const others = s.p.filter((p, j) => j !== i).map((p) => p.pts);
+          const ok = mode === 'none' || !others.length ||
+            (mode === 'standard' ? me.pts >= Math.max(...others) : me.pts <= Math.min(...others));
+          if (ok) { me.totalMarks += marks; me.rounds++; return { s, stop: true, won: true, scored: marks, call: 'Game shot' }; }
+        }
+      }
+      me.totalMarks += marks; me.rounds++;
+      return { s, scored: marks, call: marks ? `${marks} mark${marks > 1 ? 's' : ''}` : 'No score' };
+    },
+    view(s, i, ctx) {
+      const p = s.p[i], list = s.nums || CRICKET;
+      const rows = list.map((t) => `<span class="mk"><span class="t">${t === 25 ? 'Bull' : t}</span><span class="m${p.marks[t] >= 3 ? ' closed' : ''}">${markGlyph(p.marks[t])}</span></span>`).join('');
+      return {
+        big: s.o.mode === 'none' ? list.filter((t) => p.marks[t] >= 3).length + '/' + list.length : p.pts,
+        hint: ctx && ctx.active && tipsOn() ? cricketTip(s, i) : '',
+        extra: `<div class="marks${list.length > 8 ? ' many' : ''}">${rows}</div>`,
+        stats: `Marks per round ${p.rounds ? (p.totalMarks / p.rounds).toFixed(2) : '–'}`,
+      };
+    },
+  };
+}
+GAMES.cricket = cricketGame({
+  name: 'Cricket', nums: CRICKET,
   rule: 'Close 15 to 20 and the bull with three marks each. Score on numbers you have closed and others have not. Close everything with the most points to win.',
-  options: [
-    { key: 'mode', label: 'Scoring', choices: [['Standard', 'standard'], ['Cut-throat', 'cut'], ['No points', 'none']], def: 'standard' },
-  ],
-  title: (o) => ({ standard: 'Cricket', cut: 'Cut-throat cricket', none: 'Cricket, no points' }[o.mode]),
-  create(o, n, prev) {
-    return { o, p: Array.from({ length: n }, (_, i) => ({
-      marks: Object.fromEntries(CRICKET.map((t) => [t, 0])), pts: 0,
-      totalMarks: prev ? prev.p[i].totalMarks : 0, rounds: prev ? prev.p[i].rounds : 0,
-    })) };
-  },
-  play(s, i, darts) {
-    const me = s.p[i], mode = s.o.mode;
-    let marks = 0;
-    const closedAll = (p) => CRICKET.every((t) => p.marks[t] >= 3);
-    for (const d of darts) {
-      if (!CRICKET.includes(d.n) || !d.m) continue;
-      for (let k = 0; k < d.m; k++) {
-        marks++;
-        if (me.marks[d.n] < 3) { me.marks[d.n]++; continue; }
-        const val = d.n;
-        const open = s.p.filter((p, j) => j !== i && p.marks[d.n] < 3);
-        if (!open.length || mode === 'none') continue;
-        if (mode === 'standard') me.pts += val;
-        else open.forEach((p) => { p.pts += val; });
-      }
-      if (closedAll(me)) {
-        const others = s.p.filter((p, j) => j !== i).map((p) => p.pts);
-        const ok = mode === 'none' || !others.length ||
-          (mode === 'standard' ? me.pts >= Math.max(...others) : me.pts <= Math.min(...others));
-        if (ok) { me.totalMarks += marks; me.rounds++; return { s, stop: true, won: true, scored: marks, call: 'Game shot' }; }
-      }
-    }
-    me.totalMarks += marks; me.rounds++;
-    return { s, scored: marks, call: marks ? `${marks} mark${marks > 1 ? 's' : ''}` : 'No score' };
-  },
-  view(s, i, ctx) {
-    const p = s.p[i];
-    const rows = CRICKET.map((t) => `<span class="mk"><span class="t">${t === 25 ? 'Bull' : t}</span><span class="m${p.marks[t] >= 3 ? ' closed' : ''}">${markGlyph(p.marks[t])}</span></span>`).join('');
-    return {
-      big: s.o.mode === 'none' ? CRICKET.filter((t) => p.marks[t] >= 3).length + '/7' : p.pts,
-      hint: ctx && ctx.active && tipsOn() ? cricketTip(s, i) : '',
-      extra: `<div class="marks">${rows}</div>`,
-      stats: `Marks per round ${p.rounds ? (p.totalMarks / p.rounds).toFixed(2) : '–'}`,
-    };
-  },
-};
+  titles: ['Cricket', 'Cut-throat cricket', 'Cricket, no points'],
+});
+const TACTICS = [20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 25];
+GAMES.tactics = cricketGame({
+  name: 'Tactics', nums: TACTICS,
+  rule: 'Cricket with more numbers: close 10 to 20 and the bull with three marks each. Score on numbers you have closed and others have not. Close everything with the most points to win.',
+  titles: ['Tactics', 'Cut-throat tactics', 'Tactics, no points'],
+});
+const MICKEY = [20, 19, 18, 17, 16, 15, 14, 13, 12, 25];
+GAMES.mickey = cricketGame({
+  name: 'Mickey Mouse', nums: MICKEY,
+  rule: 'Cricket on 12 to 20 and the bull. Three marks close a number. Score on numbers you have closed and others have not. Close everything with the most points to win.',
+  titles: ['Mickey Mouse', 'Cut-throat Mickey Mouse', 'Mickey Mouse, no points'],
+});
 
 // ---------- Around the Clock ----------
 const CLOCK = [...Array.from({ length: 20 }, (_, k) => k + 1), 25];
@@ -1035,6 +1061,208 @@ GAMES.killer = {
   },
 };
 
+// ---------- Baseball ----------
+GAMES.baseball = {
+  name: 'Baseball',
+  rule: 'Inning 1 aims at 1, inning 2 at 2, and so on. Each dart on the inning\'s number scores runs: single 1, double 2, treble 3. Most runs after the last inning wins.',
+  options: [{ key: 'rounds', label: 'Innings', choices: [['5 innings', 5], ['9 innings', 9]], def: 9 }],
+  title: (o) => `Baseball, ${o.rounds} innings`,
+  rounds: (o) => o.rounds,
+  create(o, n) { return { o, p: Array.from({ length: n }, () => ({ pts: 0 })) }; },
+  target: (round) => ((round - 1) % 20) + 1,
+  play(s, i, darts, ctx) {
+    const t = this.target(ctx.round);
+    const runs = darts.filter((d) => d.n === t && d.m).reduce((a, d) => a + d.m, 0);
+    s.p[i].pts += runs;
+    return { s, scored: runs, call: runs ? `${runs} run${runs > 1 ? 's' : ''}` : 'No score' };
+  },
+  view(s, i, ctx) {
+    const t = this.target(ctx.round);
+    return { big: s.p[i].pts, hint: ctx.active ? (tipsOn() ? `Aim T${t} · 3 runs` : `Aim at ${t}`) : '', stats: '' };
+  },
+  roundEnd(s, round) {
+    if (round < s.o.rounds) return null;
+    const w = argmax(s.p.map((p) => p.pts));
+    return w.length === 1 ? w[0] : null; // tie: extra innings
+  },
+};
+
+// ---------- Golf ----------
+GAMES.golf = {
+  name: 'Golf',
+  rule: 'Hole 1 aims at 1, hole 2 at 2, and so on. The first dart that hits the hole\'s number ends it: treble 1 stroke, double 2, single 3. No hit is 4. Fewest strokes wins.',
+  options: [{ key: 'rounds', label: 'Holes', choices: [['9 holes', 9], ['18 holes', 18]], def: 9 }],
+  title: (o) => `Golf, ${o.rounds} holes`,
+  rounds: (o) => o.rounds,
+  create(o, n) { return { o, p: Array.from({ length: n }, () => ({ strokes: 0, card: [] })) }; },
+  target: (round) => ((round - 1) % 18) + 1,
+  play(s, i, darts, ctx) {
+    const t = this.target(ctx.round), p = s.p[i];
+    const hit = darts.find((d) => d.n === t && d.m);
+    let strokes = 0;
+    if (hit) strokes = 4 - hit.m;
+    else if (ctx.final || darts.length >= 3) strokes = 4;
+    else return { s, scored: 0 };
+    p.strokes += strokes; p.card.push(strokes);
+    return { s, stop: !!hit, scored: strokes, call: ['', 'Eagle', 'Birdie', 'Par', 'Bogey'][strokes] };
+  },
+  view(s, i, ctx) {
+    const t = this.target(ctx.round), p = s.p[i];
+    return { big: p.strokes, hint: ctx.active ? (tipsOn() ? `Hole ${t}: aim T${t} · treble 1, double 2, single 3` : `Aim at ${t}`) : '', stats: p.card.length ? 'Holes ' + p.card.slice(-9).join(' ') : '' };
+  },
+  roundEnd(s, round) {
+    if (round < s.o.rounds) return null;
+    const w = argmin(s.p.map((p) => p.strokes));
+    return w.length === 1 ? w[0] : null; // tie: extra holes
+  },
+};
+
+// ---------- Fives ----------
+GAMES.fives = {
+  name: 'Fives',
+  rule: 'Add up the three darts. If the total is a multiple of 5, you score the total divided by 5. Otherwise nothing. First to the target wins.',
+  options: [{ key: 'target', label: 'First to', choices: [['50 points', 50], ['100 points', 100], ['150 points', 150]], def: 100 }],
+  title: (o) => `Fives, first to ${o.target}`,
+  create(o, n) { return { o, p: Array.from({ length: n }, () => ({ pts: 0, visits: 0 })) }; },
+  play(s, i, darts, ctx) {
+    const p = s.p[i], done = ctx.final || darts.length >= 3;
+    const total = darts.reduce((a, d) => a + value(d), 0);
+    if (!done) return { s, scored: 0 };
+    const scored = total > 0 && total % 5 === 0 ? total / 5 : 0;
+    p.pts += scored; p.visits++;
+    if (p.pts >= s.o.target) return { s, stop: true, won: true, scored, call: 'Game shot' };
+    return { s, scored, call: scored ? String(scored) : 'No score' };
+  },
+  view(s, i, ctx) {
+    const p = s.p[i];
+    return { big: p.pts, hint: ctx && ctx.active ? `${Math.max(s.o.target - p.pts, 0)} to go${tipsOn() ? ' · total must end in 0 or 5' : ''}` : '', stats: `Per visit ${p.visits ? (p.pts / p.visits).toFixed(1) : '–'}` };
+  },
+};
+
+// ---------- Follow the Leader ----------
+GAMES.leader = {
+  name: 'Follow the Leader',
+  rule: 'Beat the previous visit\'s total or lose a life. The first player only has to score. At zero lives you are out. Last player standing wins.',
+  options: [{ key: 'lives', label: 'Lives', choices: [['3 lives', 3], ['5 lives', 5], ['9 lives', 9]], def: 3 }],
+  title: (o) => `Follow the Leader, ${o.lives} lives`,
+  minPlayers: 2,
+  create(o, n) { return { o, last: 0, p: Array.from({ length: n }, () => ({ lives: o.lives })) }; },
+  play(s, i, darts, ctx) {
+    const me = s.p[i], total = darts.reduce((a, d) => a + value(d), 0);
+    if (!(ctx.final || darts.length >= 3)) return { s, scored: total };
+    let call = String(total);
+    if (total <= s.last) { me.lives--; call = me.lives <= 0 ? 'Out' : 'Lost a life'; }
+    s.last = total;
+    const alive = s.p.map((p, k) => k).filter((k) => s.p[k].lives > 0);
+    if (alive.length <= 1) return { s, stop: true, won: true, winner: alive[0] ?? i, scored: total, call: 'Game shot' };
+    return { s, stop: me.lives <= 0, scored: total, call };
+  },
+  isOut: (s, i) => s.p[i].lives <= 0,
+  view(s, i, ctx) {
+    const p = s.p[i];
+    const hearts = '●'.repeat(Math.max(p.lives, 0)) + '○'.repeat(Math.max(s.o.lives - Math.max(p.lives, 0), 0));
+    const beat = ctx && ctx.active && ctx.dartsLeft > 0 ? `Beat ${s.last}${tipsOn() && s.last < 180 ? ' · aim T20' : ''}` : '';
+    return { big: p.lives, hint: beat || hearts, tag: p.lives <= 0 ? 'Out' : '', stats: `Lives ${Math.max(p.lives, 0)}` };
+  },
+};
+
+// ---------- Scram ----------
+const SCRAM = [20, 19, 18, 17, 16, 15, 25];
+const scramMarks = () => Object.fromEntries(SCRAM.map((t) => [t, 0]));
+GAMES.scram = {
+  name: 'Scram',
+  rule: 'For two players. One scores, the other closes. The scorer earns points on numbers the closer has not yet closed. The closer needs three marks on each of 15 to 20 and the bull. Then the roles swap. Most points wins.',
+  options: [],
+  title: () => 'Scram',
+  minPlayers: 2,
+  maxPlayers: 2,
+  scorer: (s) => (s.phase % 2 === 1 ? 0 : 1),
+  create(o) { return { o, phase: 1, marks: scramMarks(), p: [{ pts: 0 }, { pts: 0 }] }; },
+  play(s, i, darts) {
+    const scorer = this.scorer(s);
+    let scored = 0, marks = 0;
+    for (const d of darts) {
+      if (!SCRAM.includes(d.n) || !d.m) continue;
+      if (i === scorer) {
+        if (s.marks[d.n] < 3) { s.p[i].pts += value(d); scored += value(d); }
+        continue;
+      }
+      const add = Math.min(d.m, 3 - s.marks[d.n]);
+      if (!add) continue;
+      s.marks[d.n] += add; marks += add;
+      if (!SCRAM.every((t) => s.marks[t] >= 3)) continue;
+      const a = s.p[0].pts, b = s.p[1].pts;
+      if (s.phase % 2 === 0 && a !== b) return { s, stop: true, won: true, winner: a > b ? 0 : 1, scored: marks, call: 'Game shot' };
+      const level = s.phase % 2 === 0;
+      s.phase++; s.marks = scramMarks();
+      return { s, stop: true, scored: marks, call: level ? 'Level, play on' : 'All closed, change over' };
+    }
+    const n = i === scorer ? scored : marks;
+    return { s, scored: n, call: n ? String(n) : 'No score' };
+  },
+  view(s, i, ctx) {
+    const scoring = this.scorer(s) === i;
+    const open = SCRAM.find((t) => s.marks[t] < 3);
+    const rows = SCRAM.map((t) => `<span class="mk"><span class="t">${t === 25 ? 'Bull' : t}</span><span class="m${s.marks[t] >= 3 ? ' closed' : ''}">${markGlyph(s.marks[t])}</span></span>`).join('');
+    const tip = ctx && ctx.active && tipsOn() && open ? `Aim ${open === 25 ? 'Bull' : 'T' + open}${scoring ? ' · score' : ' · close it'}` : '';
+    return { big: s.p[i].pts, hint: tip, tag: scoring ? 'Scoring' : 'Closing', extra: `<div class="marks">${rows}</div>`, stats: `Half ${((s.phase - 1) % 2) + 1} of 2` };
+  },
+};
+
+// ---------- Checkout drill ----------
+GAMES.checkout = {
+  name: 'Checkout drill',
+  rule: 'Check out the target in one visit with a double out. Success moves the target up by one, otherwise you get another try, and after the last try the target goes back to the start. Highest target checked out wins.',
+  options: [
+    { key: 'start', label: 'Start at', choices: [['81', 81], ['101', 101], ['121', 121]], def: 121 },
+    { key: 'tries', label: 'Visits per target', choices: [['1 visit', 1], ['3 visits', 3]], def: 3 },
+    { key: 'rounds', label: 'Visits', choices: [['12 visits', 12], ['21 visits', 21], ['30 visits', 30]], def: 21 },
+  ],
+  title: (o) => `Checkout drill from ${o.start}`,
+  rounds: (o) => o.rounds,
+  create(o, n) { return { o, p: Array.from({ length: n }, () => ({ target: o.start, rem: o.start, tries: 0, best: 0 })) }; },
+  play(s, i, darts, ctx) {
+    const p = s.p[i], target = p.target;
+    let rem = target, bust = false;
+    for (const d of darts) {
+      const r = rem - value(d);
+      if (r < 0 || r === 1 || (r === 0 && d.m !== 2)) { bust = true; break; }
+      rem = r;
+      if (rem === 0) break;
+    }
+    const out = !bust && rem === 0;
+    p.rem = bust ? target : rem;
+    if (ctx.final) {
+      p.rem = target;
+      if (out) {
+        p.best = Math.max(p.best, target); p.tries = 0;
+        let next = target + 1;
+        while (BOGEY.has(next)) next++;
+        p.target = p.rem = Math.min(next, 170);
+      } else if (++p.tries >= s.o.tries) { p.tries = 0; p.target = p.rem = s.o.start; }
+    }
+    if (bust) return { s, stop: true, bust: true, scored: 0, call: 'Bust' };
+    if (out) return { s, stop: true, scored: target, call: 'Checked out' };
+    const scored = target - rem;
+    return { s, scored, call: scored ? String(scored) : 'No score' };
+  },
+  view(s, i, ctx) {
+    const p = s.p[i];
+    const dl = ctx.active ? ctx.dartsLeft : 3;
+    const route = ctx.active && !ctx.bust && p.rem > 1 ? checkout(p.rem, dl) : null;
+    return {
+      big: p.rem,
+      hint: ctx.bust ? 'Bust' : route ? route.map((d) => d.name).join(' ') : `Target ${p.target} · try ${p.tries + 1} of ${s.o.tries}`,
+      stats: `Best ${p.best || '–'}`,
+    };
+  },
+  roundEnd(s, round) {
+    if (round < s.o.rounds) return null;
+    const w = argmax(s.p.map((p) => p.best));
+    return w.length === 1 ? w[0] : null;
+  },
+};
+
 // Short rules shown in the menu's Rules section. Keep in step with the play() functions above.
 const RULES = {
   x01: [
@@ -1078,6 +1306,48 @@ const RULES = {
     'Miss all three and that double\'s value is taken off.',
     'At <b>zero or below</b> you are out. Highest score at the end, or the last player left, wins.',
   ],
+  tactics: [
+    'Cricket with more numbers: <b>10 to 20 and the bull</b>. Three marks close a number.',
+    'Scoring works as in Cricket: standard, cut-throat (lowest score wins) or no points.',
+    'Close all twelve while level or ahead on points (behind in cut-throat) to win the leg.',
+  ],
+  mickey: [
+    'Cricket on <b>12 to 20 and the bull</b>. A single is 1 mark, a double 2, a treble 3. Three marks close a number.',
+    'Scoring works as in Cricket: standard, cut-throat (lowest score wins) or no points.',
+    'Close all ten while level or ahead on points (behind in cut-throat) to win the leg.',
+  ],
+  baseball: [
+    'Inning 1 aims at <b>1</b>, inning 2 at <b>2</b>, and so on, for 5 or 9 innings.',
+    'Each dart on the inning\'s number is worth <b>runs</b>: single 1, double 2, treble 3.',
+    'Most runs after the last inning wins. A tie plays extra innings.',
+  ],
+  golf: [
+    'Hole 1 aims at <b>1</b>, hole 2 at <b>2</b>, and so on, for 9 or 18 holes.',
+    'The <b>first dart</b> that hits the hole\'s number ends the hole: treble = 1 stroke, double = 2, single = 3. Miss with all three darts and it is 4.',
+    '<b>Fewest strokes</b> wins. A tie plays extra holes.',
+  ],
+  fives: [
+    'Add up your three darts. If the total is a <b>multiple of 5</b> you score the total <b>divided by 5</b>.',
+    'Any other total scores nothing.',
+    'First to <b>50, 100 or 150</b> wins.',
+  ],
+  leader: [
+    'Your visit must <b>beat the total of the previous visit</b>. The first player only has to score something.',
+    'Fail and you lose a <b>life</b>. At zero you are out.',
+    'Start with 3, 5 or 9 lives. <b>Last player standing</b> wins.',
+  ],
+  scram: [
+    'Two players. One is the <b>scorer</b>, the other the <b>closer</b>.',
+    'The scorer earns the value of every dart on <b>15 to 20 and the bull</b> that the closer has not closed yet.',
+    'The closer needs three marks on each of the seven numbers. When all are closed the roles swap and the numbers open again.',
+    'After both halves the higher score wins. A tie plays another pair of halves.',
+  ],
+  checkout: [
+    'The target starts at <b>81, 101 or 121</b>. Check it out in one visit with a double out.',
+    'Success moves the target up one (skipping numbers with no finish). With 3 visits per target, a failed try is repeated.',
+    'After the last try the target <b>goes back to the start</b>.',
+    'After the set number of visits, the player who checked out the highest target wins.',
+  ],
   killer: [
     'Every player gets a <b>random number</b>, shown as their big number.',
     'Hit <b>your own double</b> to become a <b>Killer</b> (any segment of it, if Counts as a hit is Any segment).',
@@ -1086,7 +1356,7 @@ const RULES = {
   ],
 };
 
-const GAME_ORDER = ['x01', 'cricket', 'clock', 'shanghai', 'countup', 'halve', 'bobs', 'killer'];
+const GAME_ORDER = ['x01', 'cricket', 'tactics', 'mickey', 'clock', 'shanghai', 'baseball', 'golf', 'countup', 'fives', 'halve', 'bobs', 'checkout', 'killer', 'leader', 'scram'];
 
 // ================= engine =================
 let G = null;
@@ -1095,10 +1365,12 @@ let ignoreUntilClear = false;
 let saidForVisit = false;
 let quiet = false, pendingWin = null;   // set while Fix scores replays visits
 const mod = () => GAMES[G.cfg.game];
+const setsLabel = (n) => (G && (G.cfg.setsToWin || 1) > 1 ? `Sets ${n || 0} · ` : '');
+const matchGoal = (legsTo, setsTo) => ((setsTo || 1) > 1 ? `first to ${setsTo} sets of ${legsTo}` : `first to ${legsTo}`);
 const emptyVisit = () => ({ overrides: {}, extra: [], seen: [] });
 
 function newGame(cfg) {
-  const g = { v: 2, hits: [], lastHits: [], cfg, legs: cfg.players.map(() => 0), cur: 0, legStarter: 0, leg: 1, round: 1, visit: emptyVisit(), history: [], over: false, winner: null };
+  const g = { v: 2, hits: [], lastHits: [], cfg, legs: cfg.players.map(() => 0), sets: cfg.players.map(() => 0), cur: 0, legStarter: 0, leg: 1, round: 1, visit: emptyVisit(), history: [], over: false, winner: null };
   g.s = GAMES[cfg.game].create(cfg.opts, cfg.players.length, null);
   return g;
 }
@@ -1167,15 +1439,21 @@ function commitVisit() {
 function legWon(w) {
   G.legs[w]++;
   const name = G.cfg.players[w];
+  const setsTo = G.cfg.setsToWin || 1;
+  let setWon = false;
   if (G.legs[w] >= G.cfg.legsToWin) {
-    G.over = true; G.winner = w;
-    speak(`Game shot, and the match, ${name}`);
-    save(); render();
-    if (quiet) pendingWin = [true, name]; else showWin(true, name);
-    releaseBoard();   // the match is over: others may play
-    return;
+    if (setsTo > 1) { G.sets = G.sets || G.legs.map(() => 0); G.sets[w]++; setWon = true; }
+    if (setsTo <= 1 || G.sets[w] >= setsTo) {
+      G.over = true; G.winner = w;
+      speak(`Game shot, and the match, ${name}`);
+      save(); render();
+      if (quiet) pendingWin = [true, name]; else showWin(true, name);
+      releaseBoard();   // the match is over: others may play
+      return;
+    }
+    G.legs = G.legs.map(() => 0);
   }
-  speak(`Game shot, ${name}`);
+  speak(setWon ? `Game shot, and the set, ${name}` : `Game shot, ${name}`);
   if (quiet) pendingWin = [false, name]; else showWin(false, name);
   G.leg++;
   G.legStarter = (G.legStarter + 1) % G.cfg.players.length;
@@ -1287,7 +1565,7 @@ function render() {
     el.className = 'player' + (active ? ' active' : '') + (active && r.bust ? ' bust' : '') + (isOut(i) && !active ? ' out' : '');
     el.innerHTML = `
       <div class="name">${esc(name)}</div>
-      <div class="legs">Legs ${G.legs[i]}${v.tag ? ` <span class="tag">${esc(v.tag)}</span>` : ''}</div>
+      <div class="legs">${setsLabel(G.sets && G.sets[i])}Legs ${G.legs[i]}${v.tag ? ` <span class="tag">${esc(v.tag)}</span>` : ''}</div>
       <div class="score">${esc(v.big)}</div>
       <div class="route">${esc(v.hint || '')}</div>
       ${v.extra || ''}
@@ -1306,7 +1584,7 @@ function render() {
   $('visit-total').textContent = r.bust ? 0 : (r.scored || 0);
   $('visit-note').textContent = r.bust ? 'bust, pull the darts' : darts.length === 3 || r.stop ? 'pull the darts' : 'this visit';
   const rounds = mod().rounds ? mod().rounds(G.cfg.opts) : null;
-  $('match-text').textContent = `${mod().title(G.cfg.opts)} · leg ${G.leg} · ${rounds ? `round ${G.round}/${rounds} · ` : ''}first to ${G.cfg.legsToWin}`;
+  $('match-text').textContent = `${mod().title(G.cfg.opts)} · leg ${G.leg} · ${rounds ? `round ${G.round}/${rounds} · ` : ''}${matchGoal(G.cfg.legsToWin, G.cfg.setsToWin)}`;
   $('btn-undo').disabled = !G.history.length;
   $('btn-fix').disabled = !G.history.some((e) => e.fixDarts);
   renderBoard(darts);
@@ -1374,7 +1652,7 @@ function renderConn() {
 function showWin(match, name) {
   $('banner-title').textContent = match ? `${name} wins` : `Game shot, ${name}`;
   $('banner-text').textContent = match
-    ? G.cfg.players.map((n, i) => `${n}: ${G.legs[i]} leg${G.legs[i] === 1 ? '' : 's'}`).join('  |  ')
+    ? G.cfg.players.map((n, i) => `${n}: ${(G.cfg.setsToWin || 1) > 1 ? `${(G.sets || [])[i] || 0} sets` : `${G.legs[i]} leg${G.legs[i] === 1 ? '' : 's'}`}`).join('  |  ')
     : 'Next leg is ready. Pull the darts.';
   const acts = $('banner-actions'); acts.innerHTML = '';
   const add = (label, fn) => { const b = document.createElement('button'); b.className = 'chip'; b.textContent = label; b.onclick = fn; acts.appendChild(b); };
@@ -1509,12 +1787,12 @@ function buildPayload() {
   const r = preview(false), darts = r.darts;
   const { sets, showLast } = hitSets(darts);
   return {
-    title: mod().title(G.cfg.opts), leg: G.leg, legsToWin: G.cfg.legsToWin, round: G.round, over: G.over,
+    title: mod().title(G.cfg.opts), leg: G.leg, legsToWin: G.cfg.legsToWin, setsToWin: G.cfg.setsToWin || 1, round: G.round, over: G.over,
     winner: G.winner != null ? G.cfg.players[G.winner] : null, sets, showLast,
     players: G.cfg.players.map((name, i) => {
       const active = i === G.cur && !G.over;
       const v = mod().view(r.s, i, { active, dartsLeft: 3 - darts.length, bust: active && r.bust, round: G.round });
-      return { name, legs: G.legs[i], big: v.big, hint: v.hint || '', tag: v.tag || '', active, bust: active && !!r.bust, out: isOut(i) && !active, recent: recentScores(i, 10) };
+      return { name, legs: G.legs[i], sets: (G.cfg.setsToWin || 1) > 1 ? (G.sets || [])[i] || 0 : null, big: v.big, hint: v.hint || '', tag: v.tag || '', active, bust: active && !!r.bust, out: isOut(i) && !active, recent: recentScores(i, 10) };
     }),
   };
 }
@@ -1532,7 +1810,7 @@ function paintPassive(d) {
     $('p-title').textContent = 'Waiting for a game'; $('p-players').innerHTML = ''; $('p-hits').innerHTML = '';
     $('p-board').innerHTML = boardSvg(); $('p-cap').textContent = ''; return;
   }
-  $('p-title').textContent = `${d.title} · leg ${d.leg} · first to ${d.legsToWin}${d.over && d.winner ? ' · ' + d.winner + ' wins' : ''}`;
+  $('p-title').textContent = `${d.title} · leg ${d.leg} · ${matchGoal(d.legsToWin, d.setsToWin)}${d.over && d.winner ? ' · ' + d.winner + ' wins' : ''}`;
   $('p-stamp').textContent = d.t && passiveMode === 'remote' ? 'Updated ' + new Date(d.t).toLocaleTimeString() : '';
   $('p-board').innerHTML = boardSvg() + dotsFor(d.sets || [], d.showLast);
   $('p-cap').textContent = d.showLast ? 'Last round' : `Round ${d.round} hits`;
@@ -1542,7 +1820,7 @@ function paintPassive(d) {
   }).join('');
   $('p-players').innerHTML = d.players.map((p, i) => `
     <div class="pp${p.active ? ' active' : ''}${p.bust ? ' bust' : ''}${p.out ? ' out' : ''}">
-      <div class="nm"><i style="display:inline-block;width:.5em;height:.5em;border-radius:50%;margin-right:.4em;background:${PCOL[i % PCOL.length]}"></i>${esc(p.name)}<small>Legs ${esc(p.legs)}${p.tag ? ' · ' + esc(p.tag) : ''}</small></div>
+      <div class="nm"><i style="display:inline-block;width:.5em;height:.5em;border-radius:50%;margin-right:.4em;background:${PCOL[i % PCOL.length]}"></i>${esc(p.name)}<small>${p.sets != null ? 'Sets ' + esc(p.sets) + ' · ' : ''}Legs ${esc(p.legs)}${p.tag ? ' · ' + esc(p.tag) : ''}</small></div>
       <div class="big">${esc(p.big)}</div>
       <div class="sub">${esc(p.hint)}</div>
       <div class="rec" aria-label="Last 10 scores">${(p.recent || []).map((n, k, a) => `<span${k === a.length - 1 ? ' class="new"' : ''}>${esc(n)}</span>`).join('')}</div>
@@ -1861,7 +2139,7 @@ function renderManage() {
     ? 'The list is saved on the board computer and shared by every device.'
     : 'The board computer could not be reached, so the list is saved in this browser only.';
 }
-let cfg = Object.assign({ game: 'x01', legsToWin: 3, opts: {} }, store.get('cfg', {}));
+let cfg = Object.assign({ game: 'x01', legsToWin: 3, setsToWin: 1, opts: {} }, store.get('cfg', {}));
 if (!GAMES[cfg.game]) cfg.game = 'x01';
 
 function gameOpts(id) {
@@ -1910,10 +2188,12 @@ function renderSetup() {
     box.appendChild(grp);
   }
   chips($('opt-legs'), [['1 leg', 1], ['2 legs', 2], ['3 legs', 3], ['5 legs', 5]], cfg.legsToWin, (v) => { cfg.legsToWin = v; store.set('cfg', cfg); });
+  chips($('opt-sets'), [['No sets', 1], ['2 sets', 2], ['3 sets', 3], ['5 sets', 5]], cfg.setsToWin, (v) => { cfg.setsToWin = v; store.set('cfg', cfg); });
 
-  const need = g.minPlayers || 1;
-  $('start').disabled = picked.length < need;
-  $('start').textContent = picked.length < need
+  const need = g.minPlayers || 1, most = g.maxPlayers || Infinity;
+  $('start').disabled = picked.length < need || picked.length > most;
+  $('start').textContent = picked.length > most ? `${g.name} is for ${most} players`
+    : picked.length < need
     ? (need > 1 ? `${g.name} needs ${need} players` : 'Start game')
     : `Start ${g.name} with ${picked.length} player${picked.length > 1 ? 's' : ''}`;
   const saved = store.get('game', null);
@@ -1952,7 +2232,7 @@ $('opt-awake').onclick = () => { store.set('awake', !awakeOn()); renderSetup(); 
 $('start').onclick = async () => {
   screenOn(true);
   if (!(await takeBoard())) { screenOn(false); return; }
-  G = newGame({ game: cfg.game, opts: gameOpts(cfg.game), legsToWin: cfg.legsToWin, players: picked.slice() });
+  G = newGame({ game: cfg.game, opts: gameOpts(cfg.game), legsToWin: cfg.legsToWin, setsToWin: cfg.setsToWin, players: picked.slice() });
   lastLineup = picked.slice();
   roster.forEach((r) => { if (picked.includes(r.name)) r.games = (r.games || 0) + 1; });
   savePlayers();
