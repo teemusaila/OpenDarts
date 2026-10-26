@@ -2015,8 +2015,26 @@ function goSignIn() {
   if (signingIn || window.PUBLIC_VIEW) return;
   signingIn = true;
   try { sessionStorage.setItem('afterLogin', location.hash); } catch {}
+  // While the browser's sign-in box is open this page stays alive. Its timers must not keep calling
+  // the Pi: every 401 makes the browser redraw the box, which looked like the login screen blinking
+  // (Android Chrome). So cover the page and let no request out until the sign-in is done.
+  const cover = document.createElement('div');
+  cover.className = 'banner on'; cover.style.zIndex = '20';
+  cover.innerHTML = '<div><h2>Sign in</h2><p>Waiting for your name and password…</p><div class="row"><button class="chip" id="signin-retry">Open sign-in</button></div></div>';
+  document.body.appendChild(cover);
+  cover.querySelector('button').onclick = () => { location.href = 'cgi-bin/login'; };
   location.href = 'cgi-bin/login';
 }
+// Every call to the Pi's CGIs goes through here: the first 401 starts the sign-in, after that no
+// further call is sent until the page is loaded again.
+const pageFetch = window.fetch.bind(window);
+window.fetch = async function (url, opts) {
+  const own = typeof url === 'string' && url.startsWith('cgi-bin/') && !url.startsWith('cgi-bin/login');
+  if (own && signingIn) throw new Error('signing in');
+  const res = await pageFetch(url, opts);
+  if (own && res.status === 401) goSignIn();
+  return res;
+};
 // Sign out. Browsers keep a sign-in until the tab is closed and offer no way to drop it, so the page
 // signs in once more with a name that doesn't exist: the browser replaces the saved sign-in with it
 // and asks for a name and password on the next load.
@@ -2429,16 +2447,17 @@ function toSetup(viewerOnly) {
 renderSetup();
 // PUBLIC_VIEW is set only in the read-only public copy (public-view-install.sh): passive display, no controls.
 if (window.PUBLIC_VIEW) showPassive('remote');
-else {
+else (async () => {
+  await lockWatch();   // one request first: if it needs a sign-in, nothing else is sent meanwhile
+  if (signingIn) return;
   loadPlayers();
   if (location.hash === '#passive') showPassive('remote');
-  lockWatch();
   setInterval(lockWatch, 3000);
   lightsCall();
   setInterval(() => lightsCall(), 30000);
   poll();
   setInterval(poll, 300);
-}
+})();
 setInterval(renderConn, 1000);
 </script>
 </body>
