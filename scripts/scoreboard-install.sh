@@ -413,8 +413,8 @@ body {
 }
 .sgroup::before, .manage::before, .boardview::before, .pboard::before, .pad .sheet::before,
 .sgroup::after, .manage::after, .boardview::after, .pboard::after, .pad .sheet::after { content: ''; position: absolute; height: 2px; pointer-events: none; }
-.sgroup::before, .manage::before, .boardview::before, .pboard::before, .pad .sheet::before { top: 0; left: 0; right: 50%; background: linear-gradient(90deg, var(--glow), transparent); }
-.sgroup::after, .manage::after, .boardview::after, .pboard::after, .pad .sheet::after { bottom: 0; left: 50%; right: 0; background: linear-gradient(90deg, transparent, var(--orange)); }
+.sgroup::before, .boardview::before, .pboard::before, .pad .sheet::before { top: 0; left: 0; right: 50%; background: linear-gradient(90deg, var(--glow), transparent); }
+.sgroup::after, .boardview::after, .pboard::after, .pad .sheet::after { bottom: 0; left: 50%; right: 0; background: linear-gradient(90deg, transparent, var(--orange)); }
 .pad .sheet { border-top: 0; border-radius: 4px 4px 0 0; }
 .boardview, .pboard { background: var(--surface) linear-gradient(to right, rgba(0, 229, 255, .05) 1px, transparent 1px) 0 0 / 24px 24px, linear-gradient(to bottom, rgba(0, 229, 255, .05) 1px, transparent 1px) 0 0 / 24px 24px; }
 /* glowing rim round the live board */
@@ -491,6 +491,35 @@ body {
 .rules summary { border-radius: 0; clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%); border-color: var(--metal-light); text-transform: uppercase; letter-spacing: .06em; }
 .rules summary:hover { border-color: var(--orange); }
 .banner { background: radial-gradient(60% 60% at 50% 45%, rgba(0, 229, 255, .12), rgba(7, 9, 14, .94)); }
+/* ---------- clearer sections: every block of the menu is its own framed panel ---------- */
+:root { --panel-border: #3d4e69; }
+.panel, .sgroup, .manage {
+  background: linear-gradient(180deg, rgba(26, 35, 50, .85), rgba(14, 19, 29, .92));
+  border: 1px solid var(--panel-border); border-left: 3px solid var(--glow); border-radius: 4px;
+  padding: 14px 18px 16px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .6), 0 10px 26px rgba(0, 0, 0, .55);
+  position: relative;
+}
+.panel::before, .panel::after { content: ''; position: absolute; height: 2px; pointer-events: none; }
+.panel::before { top: -1px; left: 0; right: 50%; background: linear-gradient(90deg, var(--glow), transparent); }
+.panel::after { bottom: -1px; left: 50%; right: 0; background: linear-gradient(90deg, transparent, var(--orange)); }
+.panel > h2, .sgroup > h2 {
+  display: flex; align-items: center; margin: 0 0 12px; padding-bottom: 9px; border-bottom: 1px solid var(--panel-border);
+  color: var(--sisal); font-size: 15px; letter-spacing: .16em;
+}
+.panel > h2::before, .sgroup > h2::before { content: '◢'; color: var(--orange); margin-right: .6em; font-size: .85em; }
+.panel.actions { padding: 14px 18px; }
+.split { display: flex; flex-wrap: wrap; gap: 14px 40px; }
+.split h3 { margin: 0 0 8px; font-family: var(--font-hud); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; color: var(--wire); }
+.rules { border-top: 1px dashed var(--panel-border); padding-top: 10px; }
+#game-opts { margin-top: 12px; padding-top: 6px; border-top: 1px dashed var(--panel-border); }
+.opt-group h3::before { content: ''; margin: 0; }
+.sgroup, .manage { max-width: 900px; }
+.manage { margin-top: 12px; border-left-color: var(--orange); background: rgba(7, 9, 14, .55); }
+@media (max-width: 700px) {
+  .panel, .sgroup, .manage { padding: 10px 12px 12px; }
+  .panel > h2, .sgroup > h2 { margin-bottom: 8px; padding-bottom: 6px; font-size: 13px; }
+  .split { gap: 8px 24px; }
+}
 @media (prefers-reduced-motion: reduce) { .chip, .start, .bar button { transition: none; } }
 </style>
 <script>
@@ -516,7 +545,7 @@ body {
   <h1 id="setup-title">Darts Scoreboard</h1>
   <p class="hint who" id="who-line" hidden><span id="who"></span> <button class="link" id="btn-logout">Sign out</button></p>
 
-  <div>
+  <div class="panel">
     <h2>Players</h2>
     <div class="row" id="roster"></div>
     <p class="hint" id="roster-hint">Tap names in throwing order.</p>
@@ -535,7 +564,7 @@ body {
     </div>
   </div>
 
-  <div>
+  <div class="panel">
     <h2>Game</h2>
     <div class="row" id="opt-game"></div>
     <p class="rule" id="game-rule"></p>
@@ -553,36 +582,29 @@ body {
     <div id="game-opts"></div>
   </div>
 
-  <div>
-    <h2>First to</h2>
-    <div class="row" id="opt-legs"></div>
+  <div class="panel">
+    <h2>Match</h2>
+    <div class="split">
+      <div><h3>First to</h3><div class="row" id="opt-legs"></div></div>
+      <div><h3>Sets</h3><div class="row" id="opt-sets"></div></div>
+    </div>
   </div>
 
-  <div>
-    <h2>Sets</h2>
-    <div class="row" id="opt-sets"></div>
-  </div>
-
-  <div class="row" style="align-items:center; gap:24px">
+  <div class="panel actions row" style="align-items:center; gap:24px">
     <button class="start" id="start" disabled>Start game</button>
     <button class="link" id="resume" hidden>Resume last game</button>
     <button class="link" id="open-passive">Open passive display (for a TV: shows the game running on another device)</button>
   </div>
 
-  <div>
-    <h2>Board</h2>
-    <div class="add">
-      <input id="api" aria-label="Board address" autocomplete="off">
-      <button class="chip" id="api-save" type="button">Save</button>
-    </div>
-    <p class="hint">Address of the Autodarts board service. Usually the Pi's address with port 3180.</p>
-    <div class="row" style="margin-top:10px">
+  <div class="panel">
+    <h2>Options</h2>
+    <div class="row">
       <button class="chip" id="opt-voice" aria-pressed="true">Score caller on</button>
       <button class="chip" id="opt-voice-test">Test voice</button>
       <button class="chip" id="opt-tips" aria-pressed="true">Throw tips on</button>
       <button class="chip" id="opt-awake" aria-pressed="true">Keep screen on</button>
       <button class="chip" id="opt-lights" hidden>Lights: auto</button>
-      <button class="chip" id="btn-settings" hidden>Settings: users, lights, game lock</button>
+      <button class="chip" id="btn-settings">Settings: board, users, lights, game lock</button>
     </div>
 
   </div>
@@ -593,7 +615,17 @@ body {
   <div class="shead"><h1 id="settings-title">Settings</h1><button class="chip" id="settings-close">Done</button></div>
   <p class="smsg" id="settings-msg" role="status"></p>
 
-  <div class="sgroup">
+  <div class="sgroup" id="board-group">
+    <h2>Board</h2>
+    <form class="sform" id="api-form">
+      <label>Address <input id="api" autocomplete="off" inputmode="url" style="width:22em"></label>
+      <button class="chip" type="submit">Save</button>
+    </form>
+    <p class="hint">Address of the Autodarts board service, usually the Pi's address with port 3180.
+      Saved on this device only.</p>
+  </div>
+
+  <div class="sgroup" data-admin>
     <h2>Users</h2>
     <p class="hint" id="users-note"></p>
     <ul class="ulist" id="users-list"></ul>
@@ -605,7 +637,7 @@ body {
     </form>
   </div>
 
-  <div class="sgroup" id="lights-group">
+  <div class="sgroup" id="lights-group" data-admin>
     <h2>Lights</h2>
     <p class="hint" id="lights-note"></p>
     <div class="row" id="lights-mode"></div>
@@ -620,7 +652,7 @@ body {
     </form>
   </div>
 
-  <div class="sgroup">
+  <div class="sgroup" data-admin>
     <h2>Secure address (HTTPS)</h2>
     <p class="hint">When set, devices that open the home address are sent here, so sign-in and the
       keep-screen-on feature use HTTPS. Empty: no redirect. If the internet is down, open the home
@@ -631,7 +663,7 @@ body {
     </form>
   </div>
 
-  <div class="sgroup">
+  <div class="sgroup" data-admin>
     <h2>Game lock</h2>
     <form class="sform" id="lock-form">
       <label>Release an unused lock after, hours <input name="hours" type="number" min="1" max="48" required></label>
@@ -2004,7 +2036,6 @@ function applyLock() {
   }
   const w = $('who');
   $('who-line').hidden = !me.user;
-  $('btn-settings').hidden = !!me.user && !me.admin;
   w.textContent = me.user ? `Signed in as ${me.user}${me.admin ? ' (admin)' : ''}${me.owner === me.user ? ' · the board is yours until the game ends' : ''}` : '';
 }
 async function lockWatch() { await lockCall(); applyLock(); }
@@ -2131,6 +2162,11 @@ function renderSettings(d) {
 async function openSettings() {
   smsg('');
   $('setup').classList.remove('on'); $('settings').classList.add('on');
+  $('api').value = apiBase();
+  // Everyone can set this device's board address; users, lights and the lock are for admins.
+  const admin = !me.user || me.admin;
+  document.querySelectorAll('#settings [data-admin]').forEach((el) => { el.hidden = !admin; });
+  if (!admin) return;
   const d = await settingsCall();
   if (d) renderSettings(d);
 }
@@ -2364,7 +2400,7 @@ $('btn-manage').onclick = () => {
   renderSetup();
   if (open && !roster.length) $('add-name').focus();
 };
-$('api-save').onclick = () => { store.set('api', $('api').value.trim().replace(/\/$/, '')); poll(); };
+$('api-form').onsubmit = (e) => { e.preventDefault(); store.set('api', $('api').value.trim().replace(/\/$/, '')); smsg('Board address saved.'); poll(); };
 $('opt-voice').onclick = () => { store.set('voice', !store.get('voice', true)); renderSetup(); if (store.get('voice', true)) speak('Score caller on', true); };
 $('opt-voice-test').onclick = () => speak('One hundred and eighty!', true);
 $('opt-tips').onclick = () => { store.set('tips', !tipsOn()); renderSetup(); };
